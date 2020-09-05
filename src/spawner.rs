@@ -7,11 +7,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
-use tokio::sync::{
-    mpsc::{Receiver},
-    oneshot,
-};
-
+use tokio::sync::{mpsc::Receiver, oneshot};
 
 use crate::model::{ProgramMap, RunCommand, RunRequest};
 
@@ -56,13 +52,12 @@ impl Spawner {
             match req {
                 RunRequest::Run(cmd) => {
                     let id = cmd.id;
-                    let jh = run_command(cmd);
-                    let _ = self.spawned.insert(id, jh.unwrap());
+                    let kill_chan = run_command(cmd);
+                    let _ = self.spawned.insert(id, kill_chan.unwrap());
                 }
                 RunRequest::Kill(id) => {
-                    eprintln!("killing");
                     if let Some(tx) = self.spawned.remove(id) {
-                        tx.send(Kill);
+                        let _ = tx.send(Kill);
                     }
                 }
             }
@@ -107,13 +102,13 @@ fn run_command(cmd: RunCommand) -> Result<oneshot::Sender<Kill>, ::tokio::io::Er
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    
 
     use super::*;
     use tokio::sync::mpsc::channel;
-    use tokio::time::delay_for;
+    
 
-    use crate::model::programId;
+    use crate::model::program_id;
 
     #[tokio::test(threaded_scheduler)]
     async fn test_run_then_kill() {
@@ -125,15 +120,13 @@ mod tests {
         });
 
         tx.send(RunRequest::Run(RunCommand {
-            id: programId(0),
+            id: program_id(0),
             name: "cat".to_string(),
             args: vec![],
         }))
         .await
         .unwrap();
 
-        tx.send(RunRequest::Kill(programId(0))).await.unwrap();
-
-        delay_for(Duration::from_millis(100000)).await;
+        tx.send(RunRequest::Kill(program_id(0))).await.unwrap();
     }
 }

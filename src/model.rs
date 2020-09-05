@@ -5,7 +5,7 @@ use std::time::Instant;
 pub struct ProgramId(u32);
 
 #[cfg(test)]
-pub fn programId(id: u32) -> ProgramId {
+pub fn program_id(id: u32) -> ProgramId {
     ProgramId(id)
 }
 

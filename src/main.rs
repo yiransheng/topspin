@@ -1,5 +1,4 @@
 use std::process::Stdio;
-
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use druid::widget::prelude::*;

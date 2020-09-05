@@ -1,4 +1,5 @@
 use std::process::Stdio;
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use druid::widget::prelude::*;
@@ -7,6 +8,9 @@ use druid::{
     AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
     WindowDesc,
 };
+
+mod model;
+mod spawner;
 
 const VERTICAL_WIDGET_SPACING: f64 = 20.0;
 const TEXT_BOX_WIDTH: f64 = 200.0;

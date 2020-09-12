@@ -42,7 +42,7 @@ impl AppData {
         self.entries.iter_mut().find_map(|entry| match entry.state {
             RunState::Idle(Some(state_id)) if state_id == id => Some(entry),
             RunState::Busy(state_id) if state_id == id => Some(entry),
-            RunState::Running(state_id) if state_id == id => Some(entry),
+            RunState::Running(state_id, _) if state_id == id => Some(entry),
             _ => None,
         })
     }
@@ -54,11 +54,12 @@ pub struct Entry {
     pub(super) state: RunState,
 }
 
-#[derive(Copy, Clone, Data)]
+#[derive(Copy, Clone, Data, Eq, PartialEq)]
 pub enum RunState {
     Idle(Option<ProgramId>),
     Busy(ProgramId),
-    Running(ProgramId),
+    // (internal_id, PID)
+    Running(ProgramId, u32),
 }
 
 impl Default for RunState {
@@ -75,11 +76,13 @@ impl RunState {
         match self {
             RunState::Idle(_) => self,
             RunState::Busy(id) => match *res {
-                RunResponse::Started(started_id, _) if id == started_id => RunState::Running(id),
+                RunResponse::Started(started_id, pid) if id == started_id => {
+                    RunState::Running(id, pid)
+                }
                 RunResponse::Exited(exit_id, _) if id == exit_id => RunState::Idle(Some(id)),
                 _ => self,
             },
-            RunState::Running(id) => match *res {
+            RunState::Running(id, _) => match *res {
                 RunResponse::Exited(exit_id, _) if id == exit_id => RunState::Idle(Some(id)),
                 _ => self,
             },

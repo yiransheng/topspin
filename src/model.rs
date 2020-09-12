@@ -93,7 +93,7 @@ impl<V> ProgramMap<V> {
     pub fn remove(&mut self, key: ProgramId) -> Option<V> {
         let index = key.0 as usize;
         if let Some(old_value) = self.elements.get_mut(index) {
-            mem::replace(old_value, None)
+            old_value.take()
         } else {
             None
         }

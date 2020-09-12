@@ -1,3 +1,4 @@
+use druid::lens::{self, LensExt};
 use druid::{
     im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
     WindowDesc,
@@ -17,9 +18,20 @@ impl ProgramIdGen for AppData {
     }
 }
 
+impl AppData {
+    pub fn entries_lens() -> impl Lens<AppData, (AppData, im::Vector<Entry>)> {
+        lens::Id.map(
+            |d: &AppData| (d.clone(), d.entries.clone()),
+            |d: &mut AppData, x: (AppData, _)| {
+                *d = x.0;
+            },
+        )
+    }
+}
+
 #[derive(Clone, Data, Lens)]
 pub struct Entry {
-    entry: EntryData,
+    data: EntryData,
     state: RunState,
 }
 
@@ -38,7 +50,31 @@ impl Default for RunState {
 
 #[derive(Clone, Data, Lens)]
 pub struct EntryData {
-    alias: String,
-    command: String,
-    args: String,
+    pub(super) alias: String,
+    pub(super) command: String,
+    pub(super) args: String,
+}
+
+pub fn new_app_data() -> AppData {
+    AppData {
+        __id_counter: 0,
+        entries: im::vector![
+            Entry {
+                state: RunState::default(),
+                data: EntryData {
+                    alias: "cat".into(),
+                    command: "cat".into(),
+                    args: String::new(),
+                }
+            },
+            Entry {
+                state: RunState::default(),
+                data: EntryData {
+                    alias: "netcat".into(),
+                    command: "nc".into(),
+                    args: "-l 7000".into(),
+                }
+            }
+        ],
+    }
 }

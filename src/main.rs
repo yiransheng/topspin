@@ -18,11 +18,7 @@ use crate::ui::{
     ui_builder,
 };
 
-const VERTICAL_WIDGET_SPACING: f64 = 20.0;
-const TEXT_BOX_WIDTH: f64 = 200.0;
-const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Hello World!");
-
-const NEW_LINE: Selector<String> = Selector::new("line");
+const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn ::std::error::Error>> {

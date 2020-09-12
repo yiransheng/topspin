@@ -1,6 +1,6 @@
 use druid::widget::{
-    Align, Button, Container, CrossAxisAlignment, Flex, Label, MainAxisAlignment, TextBox,
-    ViewSwitcher,
+    Align, Button, Container, CrossAxisAlignment, Flex, FlexParams, Label, MainAxisAlignment,
+    Padding, TextBox, ViewSwitcher,
 };
 use druid::{
     self, AppLauncher, Color, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget,
@@ -11,36 +11,41 @@ use super::app_data::{AppData, Entry, RunState};
 use crate::model::{ProgramIdGen, RunRequest};
 
 pub(super) fn entry() -> impl Widget<(AppData, Entry)> {
-    Container::new(
-        Flex::row()
-            .main_axis_alignment(MainAxisAlignment::Start)
-            .must_fill_main_axis(true)
-            .with_flex_child(entry_data().lens(druid::lens!((AppData, Entry), 1)), 8.0)
-            .with_flex_child(actions(), 2.0),
+    Padding::new(
+        4.0,
+        Container::new(
+            Flex::row()
+                .main_axis_alignment(MainAxisAlignment::SpaceBetween)
+                .must_fill_main_axis(true)
+                .with_flex_child(entry_data().lens(druid::lens!((AppData, Entry), 1)), 8.0)
+                .with_flex_child(actions(), 2.0),
+        )
+        .padding((8.0, 4.0))
+        .border(Color::grey8(222), 1.0),
     )
-    .padding(4.0)
-    .border(Color::WHITE, 1.0)
 }
 
 fn entry_data() -> impl Widget<Entry> {
     Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Start)
-        .with_child(Label::new(|entry: &Entry, _env: &Env| {
-            let state = entry.state;
-            match state {
-                RunState::Running(_, pid) => format!("{} (PID: {})", &entry.data.alias, pid),
-                _ => entry.data.alias.clone(),
-            }
-        }))
+        .with_child(
+            Label::new(|entry: &Entry, _env: &Env| {
+                let state = entry.state;
+                match state {
+                    RunState::Running(_, pid) => format!("{} (PID: {})", &entry.data.alias, pid),
+                    _ => entry.data.alias.clone(),
+                }
+            })
+            .with_text_size(20.0),
+        )
         .with_spacer(4.0)
-        .with_child(Label::new(|entry: &Entry, _env: &Env| {
-            format!("{} {}", &entry.data.command, &entry.data.args)
-        }))
+        .with_child(
+            Label::new(|entry: &Entry, _env: &Env| {
+                format!("{} {}", &entry.data.command, &entry.data.args)
+            })
+            .with_text_size(14.0),
+        )
 }
-
-const IDLE: u32 = 0;
-const BUSY: u32 = 1;
-const RUNNING: u32 = 2;
 
 fn actions() -> impl Widget<(AppData, Entry)> {
     ViewSwitcher::new(
@@ -51,6 +56,8 @@ fn actions() -> impl Widget<(AppData, Entry)> {
             _ => Box::new(Label::new("waiting...")),
         },
     )
+    .fix_size(96.0, 32.0)
+    .align_right()
 }
 
 fn start_button() -> impl Widget<(AppData, Entry)> {

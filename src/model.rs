@@ -47,6 +47,16 @@ pub enum RunResponse {
     IoError(ProgramId, io::Error),
 }
 
+impl RunResponse {
+    pub fn program_id(&self) -> ProgramId {
+        match self {
+            RunResponse::Started(id, _) => *id,
+            RunResponse::Exited(id, _) => *id,
+            RunResponse::IoError(id, _) => *id,
+        }
+    }
+}
+
 pub struct ProgramMap<V> {
     elements: Vec<Option<V>>,
 }

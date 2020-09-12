@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::io::{Error, ErrorKind};
+
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
 
@@ -24,6 +24,7 @@ pub struct Spawner {
 struct Kill;
 
 struct KillableChild {
+    killed: bool,
     kill_chan: oneshot::Receiver<Kill>,
     child: Child,
 }
@@ -32,11 +33,15 @@ impl Future for KillableChild {
     type Output = ::tokio::io::Result<ExitStatus>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(_) = Pin::new(&mut self.kill_chan).poll(cx) {
-            Poll::Ready(match self.child.kill() {
-                Ok(_) => Err(Error::new(ErrorKind::Interrupted, "Killed")),
-                Err(err) => Err(err),
-            })
+        if self.killed {
+            Pin::new(&mut self.child).poll(cx)
+        } else if let Poll::Ready(_) = Pin::new(&mut self.kill_chan).poll(cx) {
+            match self.child.kill() {
+                Ok(_) => {}
+                Err(err) => return Poll::Ready(Err(err)),
+            }
+            self.killed = true;
+            Pin::new(&mut self.child).poll(cx)
         } else {
             Pin::new(&mut self.child).poll(cx)
         }
@@ -104,6 +109,7 @@ fn run_command(
 
     let (tx, rx) = oneshot::channel();
     let child = KillableChild {
+        killed: false,
         kill_chan: rx,
         child,
     };

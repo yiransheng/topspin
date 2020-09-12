@@ -1,11 +1,10 @@
+use std::iter::Iterator;
+
 use druid::lens::{self, LensExt};
-use druid::{
-    im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
-    WindowDesc,
-};
+use druid::{im, Data, Lens};
 use tokio::sync::mpsc;
 
-use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest};
+use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest, RunResponse};
 
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
@@ -32,6 +31,21 @@ impl AppData {
             },
         )
     }
+
+    pub fn handle_run_respone(&mut self, run_response: &RunResponse) {
+        if let Some(entry) = self.find_entry(run_response.program_id()) {
+            entry.state = entry.state.next(run_response);
+        }
+    }
+
+    fn find_entry(&mut self, id: ProgramId) -> Option<&mut Entry> {
+        self.entries.iter_mut().find_map(|entry| match entry.state {
+            RunState::Idle(Some(state_id)) if state_id == id => Some(entry),
+            RunState::Busy(state_id) if state_id == id => Some(entry),
+            RunState::Running(state_id) if state_id == id => Some(entry),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Clone, Data, Lens)]
@@ -50,6 +64,26 @@ pub enum RunState {
 impl Default for RunState {
     fn default() -> Self {
         RunState::Idle(None)
+    }
+}
+
+impl RunState {
+    pub(super) fn next(self, res: &RunResponse) -> Self {
+        if let RunResponse::IoError(_, _) = *res {
+            return RunState::Idle(None);
+        }
+        match self {
+            RunState::Idle(_) => self,
+            RunState::Busy(id) => match *res {
+                RunResponse::Started(started_id, _) if id == started_id => RunState::Running(id),
+                RunResponse::Exited(exit_id, _) if id == exit_id => RunState::Idle(Some(id)),
+                _ => self,
+            },
+            RunState::Running(id) => match *res {
+                RunResponse::Exited(exit_id, _) if id == exit_id => RunState::Idle(Some(id)),
+                _ => self,
+            },
+        }
     }
 }
 

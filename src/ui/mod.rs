@@ -6,9 +6,11 @@ use druid::{
 
 pub mod app_data;
 mod entry;
+mod response_handler;
 
 use self::app_data::AppData;
 use self::entry::entry;
+use self::response_handler::ResponseHandler;
 
 pub fn ui_builder() -> impl Widget<AppData> {
     let mut root = Flex::column();
@@ -16,5 +18,5 @@ pub fn ui_builder() -> impl Widget<AppData> {
     let list = Scroll::new(list).vertical().lens(AppData::entries_lens());
 
     root.add_flex_child(list, 1.0);
-    root
+    root.controller(ResponseHandler::new())
 }

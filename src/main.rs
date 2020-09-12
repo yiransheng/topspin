@@ -60,6 +60,7 @@ async fn event_bridge(
     sink: ExtEventSink,
 ) -> Result<(), Box<dyn ::std::error::Error>> {
     while let Some(res) = chan.recv().await {
+        eprintln!("{:?}", res);
         sink.submit_command(RUN_RESPONSES, res, None)?;
     }
 

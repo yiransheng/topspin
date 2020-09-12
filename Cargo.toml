@@ -8,4 +8,5 @@ edition = "2018"
 
 [dependencies]
 tokio = { version = "0.2", features = ["full"] }
-druid = "0.6.0"
+druid = { version = "0.6.0", features = ["im"] }
+shell-words = "1.0.0"

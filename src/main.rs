@@ -10,6 +10,7 @@ use druid::{
 
 mod model;
 mod spawner;
+mod ui;
 
 const VERTICAL_WIDGET_SPACING: f64 = 20.0;
 const TEXT_BOX_WIDTH: f64 = 200.0;

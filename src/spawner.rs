@@ -7,12 +7,16 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
-use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    oneshot,
+};
 
-use crate::model::{ProgramMap, RunCommand, RunRequest};
+use crate::model::{ProgramMap, RunCommand, RunRequest, RunResponse};
 
 pub struct Spawner {
     requests: Receiver<RunRequest>,
+    responses: Sender<RunResponse>,
     spawned: ProgramMap<oneshot::Sender<Kill>>,
 }
 
@@ -40,11 +44,16 @@ impl Future for KillableChild {
 }
 
 impl Spawner {
-    pub fn new(requests: Receiver<RunRequest>) -> Self {
-        Self {
-            requests,
-            spawned: ProgramMap::new(),
-        }
+    pub fn new(requests: Receiver<RunRequest>) -> (Self, Receiver<RunResponse>) {
+        let (tx, rx) = mpsc::channel(32);
+        (
+            Self {
+                requests,
+                responses: tx,
+                spawned: ProgramMap::new(),
+            },
+            rx,
+        )
     }
 
     pub async fn run(&mut self) -> Result<(), ::tokio::io::Error> {
@@ -52,7 +61,7 @@ impl Spawner {
             match req {
                 RunRequest::Run(cmd) => {
                     let id = cmd.id;
-                    let kill_chan = run_command(cmd);
+                    let kill_chan = run_command(cmd, self.responses.clone());
                     let _ = self.spawned.insert(id, kill_chan.unwrap());
                 }
                 RunRequest::Kill(id) => {
@@ -67,8 +76,11 @@ impl Spawner {
     }
 }
 
-fn run_command(cmd: RunCommand) -> Result<oneshot::Sender<Kill>, ::tokio::io::Error> {
-    let RunCommand { name, args, .. } = cmd;
+fn run_command(
+    cmd: RunCommand,
+    mut resp: Sender<RunResponse>,
+) -> Result<oneshot::Sender<Kill>, ::tokio::io::Error> {
+    let RunCommand { name, args, id } = cmd;
     let mut command = tokio::process::Command::new(name);
     for arg in args.into_iter() {
         command.arg(arg);
@@ -80,6 +92,12 @@ fn run_command(cmd: RunCommand) -> Result<oneshot::Sender<Kill>, ::tokio::io::Er
 
     let pid = child.id();
     eprintln!("PID: {}", pid);
+
+    let mut resp_1 = resp.clone();
+    tokio::spawn(async move {
+        resp_1.send(RunResponse::Started(id, pid)).await;
+    });
+
     let stdout = child.stdout.take().unwrap();
 
     let _reader = BufReader::new(stdout).lines();
@@ -93,8 +111,14 @@ fn run_command(cmd: RunCommand) -> Result<oneshot::Sender<Kill>, ::tokio::io::Er
     // Ensure the child process is spawned in the runtime so it can
     // make progress on its own while we await for any output.
     let _join_handle = tokio::spawn(async move {
-        let status = child.await;
-        eprintln!("PID: {}, status: {:?}", pid, status);
+        match child.await {
+            Ok(status) => {
+                resp.send(RunResponse::Exited(id, status)).await;
+            }
+            Err(err) => {
+                resp.send(RunResponse::IoError(id, err)).await;
+            }
+        }
     });
 
     Ok(tx)
@@ -102,18 +126,15 @@ fn run_command(cmd: RunCommand) -> Result<oneshot::Sender<Kill>, ::tokio::io::Er
 
 #[cfg(test)]
 mod tests {
-    
-
     use super::*;
     use tokio::sync::mpsc::channel;
-    
 
     use crate::model::program_id;
 
     #[tokio::test(threaded_scheduler)]
     async fn test_run_then_kill() {
         let (mut tx, rx) = channel(128);
-        let mut spawner = Spawner::new(rx);
+        let (mut spawner, _) = Spawner::new(rx);
 
         tokio::spawn(async move {
             spawner.run().await.unwrap();

@@ -1,8 +1,25 @@
+use std::io;
 use std::mem;
-use std::time::Instant;
+use std::process::ExitStatus;
 
-#[derive(Debug, Copy, Clone, Ord, Eq, PartialOrd, PartialEq, Hash)]
+use druid::{
+    im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
+    WindowDesc,
+};
+
+#[derive(Debug, Copy, Clone, Ord, Eq, PartialOrd, PartialEq, Hash, Data)]
 pub struct ProgramId(u32);
+
+pub trait ProgramIdGen {
+    fn counter(&mut self) -> &mut u32;
+
+    fn nextId(&mut self) -> ProgramId {
+        let counter = self.counter();
+        let id = *counter;
+        *counter = id + 1;
+        ProgramId(id)
+    }
+}
 
 #[cfg(test)]
 pub fn program_id(id: u32) -> ProgramId {
@@ -22,19 +39,12 @@ pub enum RunRequest {
     Kill(ProgramId),
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum RunState {
-    NotRunning,
-    // Unresponsive,
-    Spawning,
-    Dying,
-    RunningSince(Instant),
-}
-
-impl Default for RunState {
-    fn default() -> Self {
-        RunState::NotRunning
-    }
+#[derive(Debug)]
+pub enum RunResponse {
+    // (InternalId, PID from OS)
+    Started(ProgramId, u32),
+    Exited(ProgramId, ExitStatus),
+    IoError(ProgramId, io::Error),
 }
 
 pub struct ProgramMap<V> {

@@ -13,7 +13,7 @@ pub struct ProgramId(u32);
 pub trait ProgramIdGen {
     fn counter(&mut self) -> &mut u32;
 
-    fn nextId(&mut self) -> ProgramId {
+    fn next_id(&mut self) -> ProgramId {
         let counter = self.counter();
         let id = *counter;
         *counter = id + 1;

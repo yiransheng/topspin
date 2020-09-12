@@ -1,15 +1,18 @@
-use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
 
 use druid::{
     AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
     WindowDesc,
 };
 
+mod constants;
 mod model;
 mod spawner;
 mod ui;
 
+use crate::constants::RUN_RESPONSES;
+use crate::model::{RunRequest, RunResponse};
+use crate::spawner::Spawner;
 use crate::ui::{
     app_data::{new_app_data, AppData},
     ui_builder,
@@ -23,49 +26,41 @@ const NEW_LINE: Selector<String> = Selector::new("line");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
-    // describe the main window
-    let main_window = WindowDesc::new(ui_builder)
-        .title(WINDOW_TITLE)
-        .window_size((400.0, 400.0));
+    let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
+    let (mut spawner, res_rx) = Spawner::new(req_rx);
 
     // create the initial app state
-    let initial_state = new_app_data();
+    let initial_state = new_app_data(req_tx);
 
-    let launcher = AppLauncher::with_window(main_window);
-    let _event_sink = launcher.get_external_handle();
+    tokio::task::spawn_blocking(move || {
+        // describe the main window
+        let main_window = WindowDesc::new(ui_builder)
+            .title(WINDOW_TITLE)
+            .window_size((400.0, 400.0));
 
-    // start the application
-    launcher
-        .use_simple_logger()
-        .launch(initial_state)
-        .expect("Failed to launch application");
+        let launcher = AppLauncher::with_window(main_window);
+        let event_sink = launcher.get_external_handle();
+        tokio::spawn(async move {
+            event_bridge(res_rx, event_sink).await.expect("Crash");
+        });
+        // start the application
+        launcher
+            .use_simple_logger()
+            .launch(initial_state)
+            .expect("Failed to launch application");
+    });
+
+    spawner.run().await?;
 
     Ok(())
 }
 
-async fn run_command(sink: ExtEventSink) -> Result<(), Box<dyn ::std::error::Error>> {
-    let mut child = tokio::process::Command::new("nc")
-        .arg("-l")
-        .arg("6700")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
-
-    let stdout = child.stdout.take().unwrap();
-
-    let mut reader = BufReader::new(stdout).lines();
-
-    // Ensure the child process is spawned in the runtime so it can
-    // make progress on its own while we await for any output.
-    tokio::spawn(async {
-        let status = child.await.expect("child process encountered an error");
-        println!("child status was: {}", status);
-    });
-
-    while let Some(line) = reader.next_line().await? {
-        sink.submit_command(NEW_LINE, line, None)?;
+async fn event_bridge(
+    mut chan: mpsc::Receiver<RunResponse>,
+    sink: ExtEventSink,
+) -> Result<(), Box<dyn ::std::error::Error>> {
+    while let Some(res) = chan.recv().await {
+        sink.submit_command(RUN_RESPONSES, res, None)?;
     }
 
     Ok(())

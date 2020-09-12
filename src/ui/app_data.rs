@@ -3,13 +3,17 @@ use druid::{
     im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
     WindowDesc,
 };
+use tokio::sync::mpsc;
 
-use crate::model::{ProgramId, ProgramIdGen};
+use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest};
 
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
     __id_counter: u32,
     entries: im::Vector<Entry>,
+
+    #[data(ignore)]
+    pub req_chan: mpsc::Sender<RunRequest>,
 }
 
 impl ProgramIdGen for AppData {
@@ -24,6 +28,7 @@ impl AppData {
             |d: &AppData| (d.clone(), d.entries.clone()),
             |d: &mut AppData, x: (AppData, _)| {
                 *d = x.0;
+                d.entries = x.1;
             },
         )
     }
@@ -31,8 +36,8 @@ impl AppData {
 
 #[derive(Clone, Data, Lens)]
 pub struct Entry {
-    data: EntryData,
-    state: RunState,
+    pub(super) data: EntryData,
+    pub(super) state: RunState,
 }
 
 #[derive(Copy, Clone, Data)]
@@ -55,9 +60,21 @@ pub struct EntryData {
     pub(super) args: String,
 }
 
-pub fn new_app_data() -> AppData {
+impl EntryData {
+    pub(super) fn make_command(&self, id: ProgramId) -> RunCommand {
+        let args = shell_words::split(&self.args).expect("Bad args");
+        RunCommand {
+            id,
+            name: self.command.clone(),
+            args,
+        }
+    }
+}
+
+pub fn new_app_data(req_chan: mpsc::Sender<RunRequest>) -> AppData {
     AppData {
         __id_counter: 0,
+        req_chan,
         entries: im::vector![
             Entry {
                 state: RunState::default(),

@@ -7,6 +7,7 @@ use druid::{
 
 mod constants;
 mod model;
+mod persist;
 mod spawner;
 mod ui;
 

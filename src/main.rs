@@ -13,21 +13,24 @@ mod ui;
 
 use crate::constants::RUN_RESPONSES;
 use crate::model::{RunRequest, RunResponse};
+use crate::persist::load_entries;
 use crate::spawner::Spawner;
-use crate::ui::{
-    app_data::{new_app_data, AppData},
-    ui_builder,
-};
+use crate::ui::{app_data::AppData, ui_builder};
 
 const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
+    let persisted = load_entries().await.unwrap_or(None);
     let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
     let (mut spawner, res_rx) = Spawner::new(req_rx);
 
     // create the initial app state
-    let initial_state = new_app_data(req_tx);
+    let initial_state = if let Some(commands) = persisted {
+        AppData::from_commands(commands, req_tx)
+    } else {
+        AppData::new(req_tx)
+    };
 
     tokio::task::spawn_blocking(move || {
         // describe the main window

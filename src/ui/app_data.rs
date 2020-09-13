@@ -5,6 +5,7 @@ use druid::{im, Data, Lens};
 use tokio::sync::mpsc;
 
 use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest, RunResponse};
+use crate::persist::{CommandEntry, Commands};
 
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
@@ -23,6 +24,27 @@ impl ProgramIdGen for AppData {
 }
 
 impl AppData {
+    pub fn new(req_chan: mpsc::Sender<RunRequest>) -> Self {
+        Self {
+            __id_counter: 0,
+            req_chan,
+            new_entry: None,
+            entries: im::vector![],
+        }
+    }
+    pub fn from_commands(commands: Commands, req_chan: mpsc::Sender<RunRequest>) -> Self {
+        let entries = commands
+            .into_iter()
+            .map(EntryData::from)
+            .map(Entry::new)
+            .collect();
+        Self {
+            __id_counter: 0,
+            req_chan,
+            new_entry: None,
+            entries,
+        }
+    }
     pub fn entries_lens() -> impl Lens<AppData, (AppData, im::Vector<Entry>)> {
         lens::Id.map(
             |d: &AppData| (d.clone(), d.entries.clone()),
@@ -129,6 +151,22 @@ impl Into<&'static str> for ValidationError {
     }
 }
 
+impl From<(String, CommandEntry)> for EntryData {
+    fn from((alias, command_entry): (String, CommandEntry)) -> Self {
+        let CommandEntry {
+            command,
+            args,
+            working_dir,
+        } = command_entry;
+        EntryData {
+            alias,
+            command: command,
+            args: args.unwrap_or_else(String::new),
+            working_dir,
+        }
+    }
+}
+
 impl EntryData {
     pub(super) fn make_command(&self, id: ProgramId) -> RunCommand {
         let args = shell_words::split(&self.args).expect("Bad args");
@@ -164,33 +202,5 @@ impl EntryData {
         } else {
             Err(errors)
         }
-    }
-}
-
-pub fn new_app_data(req_chan: mpsc::Sender<RunRequest>) -> AppData {
-    AppData {
-        __id_counter: 0,
-        req_chan,
-        new_entry: None,
-        entries: im::vector![
-            Entry {
-                state: RunState::default(),
-                data: EntryData {
-                    alias: "cat".into(),
-                    command: "cat".into(),
-                    args: String::new(),
-                    working_dir: None,
-                }
-            },
-            Entry {
-                state: RunState::default(),
-                data: EntryData {
-                    alias: "netcat".into(),
-                    command: "nc".into(),
-                    args: "-l 7000".into(),
-                    working_dir: None,
-                }
-            }
-        ],
     }
 }

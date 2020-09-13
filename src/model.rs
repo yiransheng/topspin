@@ -31,6 +31,7 @@ pub struct RunCommand {
     pub id: ProgramId,
     pub name: String,
     pub args: Vec<String>,
+    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -85,10 +85,18 @@ fn run_command(
     cmd: RunCommand,
     mut resp: Sender<RunResponse>,
 ) -> Result<oneshot::Sender<Kill>, ::tokio::io::Error> {
-    let RunCommand { name, args, id } = cmd;
+    let RunCommand {
+        name,
+        args,
+        id,
+        working_dir,
+    } = cmd;
     let mut command = tokio::process::Command::new(name);
     for arg in args.into_iter() {
         command.arg(arg);
+    }
+    if let Some(dir) = working_dir {
+        command.current_dir(dir);
     }
     let mut child: Child = command
         .stdout(Stdio::piped())
@@ -150,6 +158,7 @@ mod tests {
             id: program_id(0),
             name: "cat".to_string(),
             args: vec![],
+            working_dir: None,
         }))
         .await
         .unwrap();

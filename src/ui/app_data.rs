@@ -9,7 +9,8 @@ use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest, RunResponse}
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
     __id_counter: u32,
-    entries: im::Vector<Entry>,
+    pub entries: im::Vector<Entry>,
+    pub new_entry: Option<EntryData>,
 
     #[data(ignore)]
     pub req_chan: mpsc::Sender<RunRequest>,
@@ -54,6 +55,15 @@ pub struct Entry {
     pub(super) state: RunState,
 }
 
+impl Entry {
+    pub(super) fn new(data: EntryData) -> Self {
+        Self {
+            data,
+            state: RunState::default(),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Data, Eq, PartialEq)]
 pub enum RunState {
     Idle(Option<ProgramId>),
@@ -90,11 +100,12 @@ impl RunState {
     }
 }
 
-#[derive(Clone, Data, Lens)]
+#[derive(Clone, Default, Data, Lens, Eq, PartialEq)]
 pub struct EntryData {
     pub(super) alias: String,
     pub(super) command: String,
     pub(super) args: String,
+    pub(super) working_dir: Option<String>,
 }
 
 impl EntryData {
@@ -104,6 +115,7 @@ impl EntryData {
             id,
             name: self.command.clone(),
             args,
+            working_dir: self.working_dir.clone(),
         }
     }
 }
@@ -112,6 +124,7 @@ pub fn new_app_data(req_chan: mpsc::Sender<RunRequest>) -> AppData {
     AppData {
         __id_counter: 0,
         req_chan,
+        new_entry: None,
         entries: im::vector![
             Entry {
                 state: RunState::default(),
@@ -119,6 +132,7 @@ pub fn new_app_data(req_chan: mpsc::Sender<RunRequest>) -> AppData {
                     alias: "cat".into(),
                     command: "cat".into(),
                     args: String::new(),
+                    working_dir: None,
                 }
             },
             Entry {
@@ -127,6 +141,7 @@ pub fn new_app_data(req_chan: mpsc::Sender<RunRequest>) -> AppData {
                     alias: "netcat".into(),
                     command: "nc".into(),
                     args: "-l 7000".into(),
+                    working_dir: None,
                 }
             }
         ],

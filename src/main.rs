@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
     let (mut spawner, res_rx) = Spawner::new(req_rx);
 
+    let mut req_tx_exit = req_tx.clone();
     // create the initial app state
     let initial_state = if let Some(commands) = persisted {
         AppData::from_commands(commands, req_tx)
@@ -38,13 +39,28 @@ async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
         let launcher = AppLauncher::with_window(main_window);
         let event_sink = launcher.get_external_handle();
         tokio::spawn(async move {
-            event_bridge(res_rx, event_sink).await.expect("Crash");
+            event_bridge(res_rx, event_sink)
+                .await
+                .unwrap_or_else(|err| {
+                    log::error!("Event error: {}", err);
+                    std::process::exit(1);
+                });
         });
         // start the application
         launcher
             .use_simple_logger()
             .launch(initial_state)
-            .expect("Failed to launch application");
+            .unwrap_or_else(|err| {
+                log::error!("Launch error: {}", err);
+                std::process::exit(1);
+            });
+
+        tokio::spawn(async move {
+            req_tx_exit
+                .send(RunRequest::Stop)
+                .await
+                .expect("Cannot send message to stop spawner");
+        });
     });
 
     spawner.run().await?;
@@ -57,7 +73,6 @@ async fn event_bridge(
     sink: ExtEventSink,
 ) -> Result<(), Box<dyn ::std::error::Error>> {
     while let Some(res) = chan.recv().await {
-        eprintln!("{:?}", res);
         sink.submit_command(RUN_RESPONSES, res, None)?;
     }
 

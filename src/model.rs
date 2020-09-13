@@ -35,6 +35,7 @@ pub struct RunCommand {
 pub enum RunRequest {
     Run(RunCommand),
     Kill(ProgramId),
+    Stop,
 }
 
 #[derive(Debug)]

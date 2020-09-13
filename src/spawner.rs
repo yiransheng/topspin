@@ -103,6 +103,7 @@ impl Spawner {
                         let _ = tx.send(Kill);
                     }
                 }
+                RunRequest::Stop => break,
             }
         }
 
@@ -133,7 +134,7 @@ fn run_command(
         .spawn()?;
 
     let pid = child.id();
-    eprintln!("PID: {}", pid);
+    log::info!("PID: {}", pid);
 
     let mut resp_1 = resp.clone();
     tokio::spawn(async move {

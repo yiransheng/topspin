@@ -1,3 +1,4 @@
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use druid::{AppLauncher, ExtEventSink, LocalizedString, WindowDesc};
@@ -16,8 +17,27 @@ use crate::ui::{app_data::AppData, ui_builder};
 
 const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use daemonize::Daemonize;
+    use std::fs::File;
+
+    let stdout = File::create("/tmp/topspin_stdout")?;
+    let stderr = File::create("/tmp/topspin_stderr")?;
+
+    let daemonize = Daemonize::new()
+        .pid_file("/tmp/topspin.pid")
+        .chown_pid_file(true)
+        .stdout(stdout)
+        .stderr(stderr)
+        .privileged_action(|| "Executed before drop privileges");
+
+    daemonize.start()?;
+
+    let mut rt = Runtime::new()?;
+    rt.block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
     let persisted = load_entries().await.unwrap_or(None);
     let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
     let (mut spawner, res_rx) = Spawner::new(req_rx);

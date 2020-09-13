@@ -10,5 +10,7 @@ edition = "2018"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "0.2", features = ["full"] }
 druid = { version = "0.6.0", features = ["im"] }
+log = "0.4.5"
+simple_logger = "1.6.0"
 toml = "0.5.6"
 shell-words = "1.0.0"

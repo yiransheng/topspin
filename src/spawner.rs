@@ -5,14 +5,33 @@ use std::process::{ExitStatus, Stdio};
 
 use std::task::{Context, Poll};
 
+use log;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
+    mpsc::{self, error::SendError, Receiver, Sender},
     oneshot,
 };
 
 use crate::model::{ProgramMap, RunCommand, RunRequest, RunResponse};
+
+trait Fatal<T, E>: Into<Result<T, E>> {
+    const MESSAGE: &'static str;
+
+    fn die_on_err(self) -> T {
+        match self.into() {
+            Ok(val) => val,
+            Err(_) => {
+                log::warn!("{}", Self::MESSAGE);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+impl<T> Fatal<(), SendError<T>> for Result<(), SendError<T>> {
+    const MESSAGE: &'static str = "Receiver (UI) is gone, killing the program";
+}
 
 pub struct Spawner {
     requests: Receiver<RunRequest>,
@@ -74,7 +93,7 @@ impl Spawner {
                         Err(err) => {
                             let mut resp = self.responses.clone();
                             tokio::spawn(async move {
-                                resp.send(RunResponse::IoError(id, err)).await;
+                                resp.send(RunResponse::IoError(id, err)).await.die_on_err();
                             });
                         }
                     }
@@ -118,7 +137,10 @@ fn run_command(
 
     let mut resp_1 = resp.clone();
     tokio::spawn(async move {
-        resp_1.send(RunResponse::Started(id, pid)).await;
+        resp_1
+            .send(RunResponse::Started(id, pid))
+            .await
+            .die_on_err();
     });
 
     let stdout = child.stdout.take().unwrap();
@@ -137,10 +159,12 @@ fn run_command(
     let _join_handle = tokio::spawn(async move {
         match child.await {
             Ok(status) => {
-                resp.send(RunResponse::Exited(id, status)).await;
+                resp.send(RunResponse::Exited(id, status))
+                    .await
+                    .die_on_err();
             }
             Err(err) => {
-                resp.send(RunResponse::IoError(id, err)).await;
+                resp.send(RunResponse::IoError(id, err)).await.die_on_err();
             }
         }
     });

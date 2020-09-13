@@ -87,7 +87,8 @@ fn start_button() -> impl Widget<(AppData, Entry)> {
 
             let mut tx = app_data.req_chan.clone();
             tokio::spawn(async move {
-                tx.send(run_request).await;
+                // If reciever does not exist, the UI will just stuck at Busy.
+                let _ = tx.send(run_request).await;
             });
 
             entry.state = RunState::Busy(id);
@@ -118,7 +119,8 @@ fn kill_button() -> impl Widget<(AppData, Entry)> {
             let kill_request = RunRequest::Kill(id);
             let mut tx = app_data.req_chan.clone();
             tokio::spawn(async move {
-                tx.send(kill_request).await;
+                // If reciever does not exist, the UI will just stuck at Busy.
+                let _ = tx.send(kill_request).await;
             });
 
             entry.state = RunState::Busy(id);

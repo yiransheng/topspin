@@ -1,5 +1,7 @@
 use druid::lens::{self, LensExt};
-use druid::widget::{Align, CrossAxisAlignment, Flex, Label, List, Scroll, TextBox, ViewSwitcher};
+use druid::widget::{
+    Align, Button, CrossAxisAlignment, Flex, Label, List, Scroll, TextBox, ViewSwitcher,
+};
 use druid::{
     im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
     WindowDesc,
@@ -27,6 +29,10 @@ pub fn ui_builder() -> impl Widget<AppData> {
                     if let Some(ref mut data) = d.new_entry {
                         *data = x.0;
                     }
+                    // New entry added
+                    if d.entries.len() < x.1.len() {
+                        d.new_entry = None;
+                    }
                     d.entries = x.1;
                 },
             ))),
@@ -39,7 +45,20 @@ pub fn ui_builder() -> impl Widget<AppData> {
 }
 
 fn list_view() -> impl Widget<AppData> {
-    Scroll::new(List::new(entry))
-        .vertical()
-        .lens(AppData::entries_lens())
+    Flex::column()
+        .cross_axis_alignment(CrossAxisAlignment::Start)
+        .with_child(
+            Button::new("New Command")
+                .on_click(|_ctx, app_data: &mut AppData, _env| {
+                    app_data.new_entry = Some(EntryData::default())
+                })
+                .fix_height(32.0)
+                .padding((3.0, 0.0))
+                .expand_width(),
+        )
+        .with_child(
+            Scroll::new(List::new(entry))
+                .vertical()
+                .lens(AppData::entries_lens()),
+        )
 }

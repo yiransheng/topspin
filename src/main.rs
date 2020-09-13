@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn ::std::error::Error>> {
         // describe the main window
         let main_window = WindowDesc::new(ui_builder)
             .title(WINDOW_TITLE)
-            .window_size((400.0, 400.0));
+            .window_size((800.0, 600.0));
 
         let launcher = AppLauncher::with_window(main_window);
         let event_sink = launcher.get_external_handle();

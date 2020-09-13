@@ -28,7 +28,9 @@ impl AppData {
             |d: &AppData| (d.clone(), d.entries.clone()),
             |d: &mut AppData, x: (AppData, _)| {
                 *d = x.0;
-                d.entries = x.1;
+                if x.1.len() == d.entries.len() {
+                    d.entries = x.1;
+                }
             },
         )
     }
@@ -49,7 +51,7 @@ impl AppData {
     }
 }
 
-#[derive(Clone, Data, Lens)]
+#[derive(Clone, Data, Lens, Eq, PartialEq)]
 pub struct Entry {
     pub(super) data: EntryData,
     pub(super) state: RunState,
@@ -108,6 +110,25 @@ pub struct EntryData {
     pub(super) working_dir: Option<String>,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ValidationError {
+    MissingAlias,
+    MissingCommand,
+    WhileSpaceInCommand,
+    BadArgs,
+}
+
+impl Into<&'static str> for ValidationError {
+    fn into(self) -> &'static str {
+        match self {
+            ValidationError::MissingAlias => "Alias cannot be emtpy",
+            ValidationError::MissingCommand => "Command cannot be emtpy",
+            ValidationError::WhileSpaceInCommand => "Command cannot contain whitespaces",
+            ValidationError::BadArgs => "Error parsing shell arguments",
+        }
+    }
+}
+
 impl EntryData {
     pub(super) fn make_command(&self, id: ProgramId) -> RunCommand {
         let args = shell_words::split(&self.args).expect("Bad args");
@@ -116,6 +137,32 @@ impl EntryData {
             name: self.command.clone(),
             args,
             working_dir: self.working_dir.clone(),
+        }
+    }
+
+    pub(super) fn validated(&self) -> Result<Self, Vec<ValidationError>> {
+        let mut errors = vec![];
+        if self.alias.trim().is_empty() {
+            errors.push(ValidationError::MissingAlias);
+        }
+        if self.command.trim().is_empty() {
+            errors.push(ValidationError::MissingCommand);
+        }
+        if self.command.chars().any(char::is_whitespace) {
+            errors.push(ValidationError::WhileSpaceInCommand);
+        }
+        if shell_words::split(&self.args).is_err() {
+            errors.push(ValidationError::BadArgs);
+        }
+        if errors.is_empty() {
+            Ok(Self {
+                alias: self.alias.trim().to_string(),
+                command: self.command.trim().to_string(),
+                args: self.args.clone(),
+                working_dir: self.working_dir.clone(),
+            })
+        } else {
+            Err(errors)
         }
     }
 }

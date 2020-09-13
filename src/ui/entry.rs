@@ -20,7 +20,8 @@ pub(super) fn entry() -> impl Widget<(AppData, Entry)> {
                 .with_flex_child(actions(), 1.0),
         )
         .padding((8.0, 4.0))
-        .border(Color::grey8(222), 1.0),
+        .background(Color::grey8(0x22))
+        .border(Color::grey8(128), 1.0),
     )
 }
 
@@ -53,6 +54,7 @@ fn entry_data() -> impl Widget<Entry> {
                     String::new()
                 }
             })
+            .with_text_color(Color::rgb(0.8, 0.1, 0.1))
             .with_text_size(10.0),
         )
 }

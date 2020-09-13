@@ -1,11 +1,6 @@
 use druid::lens::{self, LensExt};
-use druid::widget::{
-    Align, Button, CrossAxisAlignment, Flex, Label, List, Scroll, TextBox, ViewSwitcher,
-};
-use druid::{
-    im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
-    WindowDesc,
-};
+use druid::widget::{Button, CrossAxisAlignment, Flex, List, Scroll, ViewSwitcher};
+use druid::{im, Widget, WidgetExt};
 
 pub mod app_data;
 

@@ -1,11 +1,7 @@
 use druid::widget::{
-    Align, Button, Container, CrossAxisAlignment, Flex, FlexParams, Label, MainAxisAlignment,
-    Padding, TextBox, ViewSwitcher,
+    Button, Container, CrossAxisAlignment, Flex, Label, MainAxisAlignment, Padding, ViewSwitcher,
 };
-use druid::{
-    self, AppLauncher, Color, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget,
-    WidgetExt, WindowDesc,
-};
+use druid::{self, Color, Env, Widget, WidgetExt};
 
 use super::app_data::{AppData, Entry, RunState};
 use crate::model::{ProgramIdGen, RunRequest};

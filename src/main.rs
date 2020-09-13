@@ -1,9 +1,6 @@
 use tokio::sync::mpsc;
 
-use druid::{
-    AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
-    WindowDesc,
-};
+use druid::{AppLauncher, ExtEventSink, LocalizedString, WindowDesc};
 
 mod constants;
 mod model;

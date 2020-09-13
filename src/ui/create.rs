@@ -1,14 +1,8 @@
 use druid::lens::{Id, LensExt};
-use druid::widget::{
-    Align, Button, Container, CrossAxisAlignment, Flex, FlexParams, Label, MainAxisAlignment,
-    Padding, TextBox, ViewSwitcher,
-};
-use druid::{
-    self, im, AppLauncher, Color, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget,
-    WidgetExt, WindowDesc,
-};
+use druid::widget::{Align, Button, CrossAxisAlignment, Flex, FlexParams, Label, TextBox};
+use druid::{self, im, Lens, Widget, WidgetExt};
 
-use super::app_data::{AppData, Entry, EntryData, RunState};
+use super::app_data::{Entry, EntryData};
 
 pub(super) fn new_entry() -> impl Widget<(EntryData, im::Vector<Entry>)> {
     Flex::column()

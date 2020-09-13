@@ -2,10 +2,7 @@ use std::io;
 use std::mem;
 use std::process::ExitStatus;
 
-use druid::{
-    im, AppLauncher, Data, Env, ExtEventSink, Lens, LocalizedString, Selector, Widget, WidgetExt,
-    WindowDesc,
-};
+use druid::Data;
 
 #[derive(Debug, Copy, Clone, Ord, Eq, PartialOrd, PartialEq, Hash, Data)]
 pub struct ProgramId(u32);

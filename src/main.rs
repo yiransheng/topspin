@@ -18,20 +18,23 @@ use crate::ui::{app_data::AppData, ui_builder};
 const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use daemonize::Daemonize;
-    use std::fs::File;
+    #[cfg(not(debug_assertions))]
+    {
+        use daemonize::Daemonize;
+        use std::fs::File;
 
-    let stdout = File::create("/tmp/topspin_stdout")?;
-    let stderr = File::create("/tmp/topspin_stderr")?;
+        let stdout = File::create("/tmp/topspin_stdout")?;
+        let stderr = File::create("/tmp/topspin_stderr")?;
 
-    let daemonize = Daemonize::new()
-        .pid_file("/tmp/topspin.pid")
-        .chown_pid_file(true)
-        .stdout(stdout)
-        .stderr(stderr)
-        .privileged_action(|| "Executed before drop privileges");
+        let daemonize = Daemonize::new()
+            .pid_file("/tmp/topspin.pid")
+            .chown_pid_file(true)
+            .stdout(stdout)
+            .stderr(stderr)
+            .privileged_action(|| "Executed before drop privileges");
 
-    daemonize.start()?;
+        daemonize.start()
+    }?;
 
     let mut rt = Runtime::new()?;
     rt.block_on(run())

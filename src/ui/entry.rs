@@ -45,6 +45,16 @@ fn entry_data() -> impl Widget<Entry> {
             })
             .with_text_size(14.0),
         )
+        .with_child(
+            Label::new(|entry: &Entry, _env: &Env| {
+                if let Some(ref error) = entry.last_run_error {
+                    format!("{}", error)
+                } else {
+                    String::new()
+                }
+            })
+            .with_text_size(10.0),
+        )
 }
 
 fn actions() -> impl Widget<(AppData, Entry)> {
@@ -68,7 +78,14 @@ fn start_button() -> impl Widget<(AppData, Entry)> {
                 }
                 _ => return,
             };
-            let run_request = RunRequest::Run(entry.data.make_command(id));
+            let run_command = match entry.data.make_command(id) {
+                Ok(run_command) => run_command,
+                Err(message) => {
+                    entry.last_run_error = Some(message);
+                    return;
+                }
+            };
+            let run_request = RunRequest::Run(run_command);
 
             let mut tx = app_data.req_chan.clone();
             tokio::spawn(async move {

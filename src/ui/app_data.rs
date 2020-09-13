@@ -32,6 +32,7 @@ impl AppData {
             entries: im::vector![],
         }
     }
+
     pub fn from_commands(commands: Commands, req_chan: mpsc::Sender<RunRequest>) -> Self {
         let entries = commands
             .into_iter()
@@ -45,6 +46,7 @@ impl AppData {
             entries,
         }
     }
+
     pub fn entries_lens() -> impl Lens<AppData, (AppData, im::Vector<Entry>)> {
         lens::Id.map(
             |d: &AppData| (d.clone(), d.entries.clone()),
@@ -60,6 +62,11 @@ impl AppData {
     pub fn handle_run_respone(&mut self, run_response: &RunResponse) {
         if let Some(entry) = self.find_entry(run_response.program_id()) {
             entry.state = entry.state.next(run_response);
+            if let RunResponse::IoError(_, ref io_error) = run_response {
+                entry.last_run_error = Some(format!("{}", io_error));
+            } else {
+                entry.last_run_error = None;
+            }
         }
     }
 
@@ -77,6 +84,7 @@ impl AppData {
 pub struct Entry {
     pub(super) data: EntryData,
     pub(super) state: RunState,
+    pub(super) last_run_error: Option<String>,
 }
 
 impl Entry {
@@ -84,6 +92,7 @@ impl Entry {
         Self {
             data,
             state: RunState::default(),
+            last_run_error: None,
         }
     }
 }
@@ -168,14 +177,15 @@ impl From<(String, CommandEntry)> for EntryData {
 }
 
 impl EntryData {
-    pub(super) fn make_command(&self, id: ProgramId) -> RunCommand {
-        let args = shell_words::split(&self.args).expect("Bad args");
-        RunCommand {
+    pub(super) fn make_command(&self, id: ProgramId) -> Result<RunCommand, String> {
+        let args =
+            shell_words::split(&self.args).map_err(|_| "Invalid command arguments".to_string())?;
+        Ok(RunCommand {
             id,
             name: self.command.clone(),
             args,
             working_dir: self.working_dir.clone(),
-        }
+        })
     }
 
     pub(super) fn validated(&self) -> Result<Self, Vec<ValidationError>> {

@@ -67,7 +67,17 @@ impl Spawner {
                 RunRequest::Run(cmd) => {
                     let id = cmd.id;
                     let kill_chan = run_command(cmd, self.responses.clone());
-                    let _ = self.spawned.insert(id, kill_chan.unwrap());
+                    match kill_chan {
+                        Ok(kill_chan) => {
+                            let _ = self.spawned.insert(id, kill_chan);
+                        }
+                        Err(err) => {
+                            let mut resp = self.responses.clone();
+                            tokio::spawn(async move {
+                                resp.send(RunResponse::IoError(id, err)).await;
+                            });
+                        }
+                    }
                 }
                 RunRequest::Kill(id) => {
                     if let Some(tx) = self.spawned.remove(id) {

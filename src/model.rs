@@ -38,6 +38,24 @@ pub enum RunRequest {
     Stop,
 }
 
+#[derive(Debug, Clone)]
+pub enum SpawnerInput<W> {
+    RunRequest(RunRequest),
+    Sink(String, W),
+}
+
+impl<W> From<RunRequest> for SpawnerInput<W> {
+    fn from(req: RunRequest) -> SpawnerInput<W> {
+        SpawnerInput::RunRequest(req)
+    }
+}
+
+impl<W> From<(String, W)> for SpawnerInput<W> {
+    fn from(x: (String, W)) -> SpawnerInput<W> {
+        SpawnerInput::Sink(x.0, x.1)
+    }
+}
+
 #[derive(Debug)]
 pub enum RunResponse {
     // (InternalId, PID from OS)

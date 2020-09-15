@@ -1,19 +1,23 @@
 use std::future::Future;
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 
 use std::task::{Context, Poll};
 
 use log;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Child;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::process::{Child, ChildStderr, ChildStdout};
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, Sender},
     oneshot,
 };
 
-use crate::model::{ProgramMap, RunCommand, RunRequest, RunResponse};
+use crate::model::{ProgramId, ProgramMap, RunCommand, RunRequest, RunResponse, SpawnerInput};
+
+type Unclaimed<T> = Arc<Mutex<Vec<T>>>;
 
 trait Fatal<T, E>: Into<Result<T, E>> {
     const MESSAGE: &'static str;
@@ -33,10 +37,13 @@ impl<T> Fatal<(), SendError<T>> for Result<(), SendError<T>> {
     const MESSAGE: &'static str = "Receiver (UI) is gone, killing the program";
 }
 
-pub struct Spawner {
-    requests: Receiver<RunRequest>,
+pub struct Spawner<W> {
+    requests_chan: Receiver<RunRequest>,
+    sinks_chan: Receiver<(String, W)>,
     responses: Sender<RunResponse>,
     spawned: ProgramMap<oneshot::Sender<Kill>>,
+    log_sinks: ProgramMap<Unclaimed<W>>,
+    alias_to_id: HashMap<String, ProgramId>,
 }
 
 #[derive(Copy, Clone)]
@@ -67,28 +74,52 @@ impl Future for KillableChild {
     }
 }
 
-impl Spawner {
-    pub fn new(requests: Receiver<RunRequest>) -> (Self, Receiver<RunResponse>) {
+impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
+    pub fn new(
+        requests: Receiver<RunRequest>,
+        sinks: Receiver<(String, W)>,
+    ) -> (Self, Receiver<RunResponse>) {
         let (tx, rx) = mpsc::channel(32);
         (
             Self {
-                requests,
+                requests_chan: requests,
+                sinks_chan: sinks,
                 responses: tx,
                 spawned: ProgramMap::new(),
+                log_sinks: ProgramMap::new(),
+                alias_to_id: HashMap::new(),
             },
             rx,
         )
     }
 
     pub async fn run(&mut self) -> Result<(), ::tokio::io::Error> {
-        while let Some(req) = self.requests.recv().await {
-            match req {
-                RunRequest::Run(cmd) => {
+        loop {
+            let input = tokio::select! {
+                input = self.requests_chan.recv() => {
+                    if let Some(input) = input {
+                        input.into()
+                    } else {
+                        continue
+                    }
+                }
+                input = self.sinks_chan.recv() => {
+                    if let Some(input) = input {
+                        input.into()
+                    } else {
+                        continue
+                    }
+                }
+            };
+            match input {
+                SpawnerInput::RunRequest(RunRequest::Run(cmd)) => {
                     let id = cmd.id;
-                    let kill_chan = run_command(cmd, self.responses.clone());
+                    let sink = Arc::new(Mutex::new(Vec::new()));
+                    let kill_chan = run_command(cmd, self.responses.clone(), sink.clone());
                     match kill_chan {
                         Ok(kill_chan) => {
                             let _ = self.spawned.insert(id, kill_chan);
+                            let _ = self.log_sinks.insert(id, sink);
                         }
                         Err(err) => {
                             let mut resp = self.responses.clone();
@@ -98,12 +129,21 @@ impl Spawner {
                         }
                     }
                 }
-                RunRequest::Kill(id) => {
+                SpawnerInput::RunRequest(RunRequest::Kill(id)) => {
                     if let Some(tx) = self.spawned.remove(id) {
                         let _ = tx.send(Kill);
                     }
                 }
-                RunRequest::Stop => break,
+                SpawnerInput::RunRequest(RunRequest::Stop) => break,
+                SpawnerInput::Sink(alias, sink) => {
+                    if let Some(program_id) = self.alias_to_id.get(&alias) {
+                        if let Some(sinks) = self.log_sinks.get(*program_id) {
+                            let mut sinks = sinks.lock().unwrap();
+                            sinks.push(sink);
+                            drop(sinks);
+                        }
+                    }
+                }
             }
         }
 
@@ -111,9 +151,75 @@ impl Spawner {
     }
 }
 
-fn run_command(
+struct LogForward {
+    stdout: ChildStdout,
+    stderr: ChildStderr,
+}
+
+impl LogForward {
+    async fn run<W: AsyncWrite + std::marker::Unpin>(
+        &mut self,
+        new_sinks: Unclaimed<W>,
+    ) -> tokio::io::Result<()> {
+        let mut out_buf: [u8; 1024] = [0; 1024];
+        let mut err_buf: [u8; 1024] = [0; 1024];
+
+        let mut sinks: Vec<Option<W>> = vec![];
+
+        const STDOUT_TAG: [u8; 1] = [1];
+        const STDERR_TAG: [u8; 1] = [2];
+
+        let mut buf: &[u8];
+        let mut tag: &[u8];
+
+        loop {
+            tokio::select! {
+                len = self.stdout.read(&mut out_buf) => {
+                    let len = len?;
+                    tag = &STDOUT_TAG;
+                    buf = &out_buf[0..len];
+                }
+                len = self.stderr.read(&mut err_buf) => {
+                    let len = len?;
+                    tag = &STDERR_TAG;
+                    buf = &err_buf[0..len];
+                }
+            };
+            {
+                let mut new_sinks = new_sinks.lock().expect("mutex error");
+                sinks.extend(new_sinks.drain(..).map(Some));
+            }
+            for sink in sinks.iter_mut() {
+                let mut sink_taken = sink.take().unwrap();
+                if LogForward::write_frame(&mut sink_taken, tag, buf)
+                    .await
+                    .is_err()
+                {
+                    drop(sink_taken);
+                    break;
+                }
+                *sink = Some(sink_taken);
+            }
+        }
+    }
+
+    async fn write_frame<W: AsyncWrite + std::marker::Unpin>(
+        out: &mut W,
+        tag: &[u8],
+        contents: &[u8],
+    ) -> tokio::io::Result<()> {
+        let len = contents.len();
+        out.write(tag).await?;
+        out.write_u64(len as u64).await?;
+        out.write(contents).await?;
+        Ok(())
+    }
+}
+
+fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
     cmd: RunCommand,
     mut resp: Sender<RunResponse>,
+    log_sinks: Unclaimed<W>,
 ) -> Result<oneshot::Sender<Kill>, ::tokio::io::Error> {
     let RunCommand {
         name,
@@ -145,8 +251,13 @@ fn run_command(
     });
 
     let stdout = child.stdout.take().unwrap();
-
-    let _reader = BufReader::new(stdout).lines();
+    let stderr = child.stderr.take().unwrap();
+    let mut log_forwarder = LogForward { stdout, stderr };
+    tokio::spawn(async move {
+        if let Err(err) = log_forwarder.run(log_sinks).await {
+            log::error!("{}", err);
+        }
+    });
 
     let (tx, rx) = oneshot::channel();
     let child = KillableChild {

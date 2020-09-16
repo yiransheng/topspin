@@ -4,12 +4,14 @@ use tokio::sync::mpsc;
 use druid::{AppLauncher, ExtEventSink, LocalizedString, WindowDesc};
 
 mod constants;
+mod log_server;
 mod model;
 mod persist;
 mod spawner;
 mod ui;
 
 use crate::constants::RUN_RESPONSES;
+use crate::log_server::run_log_server;
 use crate::model::{RunRequest, RunResponse};
 use crate::persist::load_entries;
 use crate::spawner::Spawner;
@@ -43,7 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
     let persisted = load_entries().await.unwrap_or(None);
     let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
-    let (mut spawner, res_rx) = Spawner::new(req_rx);
+    let (sink_tx, sink_rx) = mpsc::channel::<(String, _)>(32);
+    let (mut spawner, res_rx) = Spawner::new(req_rx, sink_rx);
 
     let mut req_tx_exit = req_tx.clone();
     // create the initial app state
@@ -84,6 +87,10 @@ async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
                 .await
                 .expect("Cannot send message to stop spawner");
         });
+    });
+
+    tokio::spawn(async move {
+        let _ = run_log_server(sink_tx).await;
     });
 
     spawner.run().await?;

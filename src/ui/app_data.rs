@@ -182,6 +182,7 @@ impl EntryData {
             shell_words::split(&self.args).map_err(|_| "Invalid command arguments".to_string())?;
         Ok(RunCommand {
             id,
+            alias: self.alias.clone(),
             name: self.command.clone(),
             args,
             working_dir: self.working_dir.clone(),

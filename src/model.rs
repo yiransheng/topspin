@@ -26,6 +26,7 @@ pub fn program_id(id: u32) -> ProgramId {
 #[derive(Debug, Clone)]
 pub struct RunCommand {
     pub id: ProgramId,
+    pub alias: String,
     pub name: String,
     pub args: Vec<String>,
     pub working_dir: Option<String>,

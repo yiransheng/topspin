@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use log;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, ChildStderr, ChildStdout};
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, Sender},
@@ -93,7 +93,7 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
         )
     }
 
-    pub async fn run(&mut self) -> Result<(), ::tokio::io::Error> {
+    pub async fn run(&mut self) -> tokio::io::Result<()> {
         loop {
             let input = tokio::select! {
                 input = self.requests_chan.recv() => {
@@ -115,10 +115,12 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
                 SpawnerInput::RunRequest(RunRequest::Run(cmd)) => {
                     let id = cmd.id;
                     let sink = Arc::new(Mutex::new(Vec::new()));
+                    let alias = cmd.alias.clone();
                     let kill_chan = run_command(cmd, self.responses.clone(), sink.clone());
                     match kill_chan {
                         Ok(kill_chan) => {
                             let _ = self.spawned.insert(id, kill_chan);
+                            let _ = self.alias_to_id.insert(alias, id);
                             let _ = self.log_sinks.insert(id, sink);
                         }
                         Err(err) => {
@@ -136,8 +138,9 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
                 }
                 SpawnerInput::RunRequest(RunRequest::Stop) => break,
                 SpawnerInput::Sink(alias, sink) => {
-                    if let Some(program_id) = self.alias_to_id.get(&alias) {
+                    if let Some(program_id) = self.alias_to_id.get(alias.trim()) {
                         if let Some(sinks) = self.log_sinks.get(*program_id) {
+                            log::info!("Command {} is running, streaming logs...", &alias);
                             let mut sinks = sinks.lock().unwrap();
                             sinks.push(sink);
                             drop(sinks);
@@ -200,6 +203,7 @@ impl LogForward {
                 }
                 *sink = Some(sink_taken);
             }
+            sinks.retain(Option::is_some);
         }
     }
 
@@ -226,6 +230,7 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
         args,
         id,
         working_dir,
+        ..
     } = cmd;
     let mut command = tokio::process::Command::new(name);
     for arg in args.into_iter() {
@@ -294,7 +299,8 @@ mod tests {
     #[tokio::test(threaded_scheduler)]
     async fn test_run_then_kill() {
         let (mut tx, rx) = channel(128);
-        let (mut spawner, _) = Spawner::new(rx);
+        let (_, rx_unused) = channel::<(String, Vec<u8>)>(128);
+        let (mut spawner, _) = Spawner::new(rx, rx_unused);
 
         tokio::spawn(async move {
             spawner.run().await.unwrap();
@@ -302,6 +308,7 @@ mod tests {
 
         tx.send(RunRequest::Run(RunCommand {
             id: program_id(0),
+            alias: "cat".to_string(),
             name: "cat".to_string(),
             args: vec![],
             working_dir: None,

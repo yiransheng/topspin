@@ -137,72 +137,6 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
     }
 }
 
-struct LogForward {
-    stdout: ChildStdout,
-    stderr: ChildStderr,
-}
-
-impl LogForward {
-    async fn run<W: AsyncWrite + std::marker::Unpin>(
-        &mut self,
-        new_sinks: Unclaimed<W>,
-    ) -> tokio::io::Result<()> {
-        let mut out_buf: [u8; 1024] = [0; 1024];
-        let mut err_buf: [u8; 1024] = [0; 1024];
-
-        let mut sinks: Vec<Option<W>> = vec![];
-
-        const STDOUT_TAG: [u8; 1] = [1];
-        const STDERR_TAG: [u8; 1] = [2];
-
-        let mut buf: &[u8];
-        let mut tag: &[u8];
-
-        loop {
-            tokio::select! {
-                len = self.stdout.read(&mut out_buf) => {
-                    let len = len?;
-                    tag = &STDOUT_TAG;
-                    buf = &out_buf[0..len];
-                }
-                len = self.stderr.read(&mut err_buf) => {
-                    let len = len?;
-                    tag = &STDERR_TAG;
-                    buf = &err_buf[0..len];
-                }
-            };
-            {
-                let mut new_sinks = new_sinks.lock().expect("mutex error");
-                sinks.extend(new_sinks.drain(..).map(Some));
-            }
-            for sink in sinks.iter_mut() {
-                let mut sink_taken = sink.take().unwrap();
-                if LogForward::write_frame(&mut sink_taken, tag, buf)
-                    .await
-                    .is_err()
-                {
-                    drop(sink_taken);
-                    break;
-                }
-                *sink = Some(sink_taken);
-            }
-            sinks.retain(Option::is_some);
-        }
-    }
-
-    async fn write_frame<W: AsyncWrite + std::marker::Unpin>(
-        out: &mut W,
-        tag: &[u8],
-        contents: &[u8],
-    ) -> tokio::io::Result<()> {
-        let len = contents.len();
-        out.write(tag).await?;
-        out.write_u64(len as u64).await?;
-        out.write(contents).await?;
-        Ok(())
-    }
-}
-
 fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
     cmd: RunCommand,
     mut resp: Sender<RunResponse>,
@@ -240,7 +174,11 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
-    let mut log_forwarder = LogForward { stdout, stderr };
+    let mut log_forwarder = LogForward {
+        stdout,
+        stderr,
+        pid,
+    };
     tokio::spawn(async move {
         if let Err(err) = log_forwarder.run(log_sinks).await {
             log::error!("Error forwarding logs: {}", err);
@@ -268,6 +206,83 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
     });
 
     Ok(tx)
+}
+
+struct LogForward {
+    stdout: ChildStdout,
+    stderr: ChildStderr,
+    pid: u32,
+}
+
+impl LogForward {
+    async fn run<W: AsyncWrite + std::marker::Unpin>(
+        &mut self,
+        new_sinks: Unclaimed<W>,
+    ) -> tokio::io::Result<()> {
+        let mut out_buf: [u8; 1024] = [0; 1024];
+        let mut err_buf: [u8; 1024] = [0; 1024];
+
+        let mut sinks: Vec<Option<W>> = vec![];
+
+        const STDOUT_TAG: [u8; 1] = [1];
+        const STDERR_TAG: [u8; 1] = [2];
+
+        let mut buf: &[u8];
+        let mut tag: &[u8];
+
+        loop {
+            let len = tokio::select! {
+                len = self.stdout.read(&mut out_buf) => {
+                    let len = len?;
+                    tag = &STDOUT_TAG;
+                    buf = &out_buf[0..len];
+                    len
+                }
+                len = self.stderr.read(&mut err_buf) => {
+                    let len = len?;
+                    tag = &STDERR_TAG;
+                    buf = &err_buf[0..len];
+                    len
+                }
+            };
+            if len == 0 {
+                sinks.clear();
+                break;
+            }
+            {
+                let mut new_sinks = new_sinks.lock().expect("mutex error");
+                sinks.extend(new_sinks.drain(..).map(Some));
+            }
+            for sink in sinks.iter_mut() {
+                let mut sink_taken = sink.take().unwrap();
+                if LogForward::write_frame(&mut sink_taken, tag, buf)
+                    .await
+                    .is_err()
+                {
+                    drop(sink_taken);
+                    break;
+                }
+                *sink = Some(sink_taken);
+            }
+            sinks.retain(Option::is_some);
+        }
+
+        log::info!("PID: {} has not more stdout/stderr outputs", self.pid);
+
+        Ok(())
+    }
+
+    async fn write_frame<W: AsyncWrite + std::marker::Unpin>(
+        out: &mut W,
+        tag: &[u8],
+        contents: &[u8],
+    ) -> tokio::io::Result<()> {
+        let len = contents.len();
+        out.write(tag).await?;
+        out.write_u64(len as u64).await?;
+        out.write(contents).await?;
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone)]

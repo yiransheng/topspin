@@ -20,6 +20,7 @@ use crate::ui::{app_data::AppData, ui_builder};
 const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // do not daemonize in debug mode.
     #[cfg(not(debug_assertions))]
     {
         use daemonize::Daemonize;
@@ -44,20 +45,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
     let persisted = load_entries().await.unwrap_or(None);
-    let (req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
+    let (mut req_tx, req_rx) = mpsc::channel::<RunRequest>(32);
     let (sink_tx, sink_rx) = mpsc::channel::<(String, _)>(32);
     let (mut spawner, res_rx) = Spawner::new(req_rx, sink_rx);
 
-    let mut req_tx_exit = req_tx.clone();
     // create the initial app state
     let initial_state = if let Some(commands) = persisted {
-        AppData::from_commands(commands, req_tx)
+        AppData::from_commands(commands, req_tx.clone())
     } else {
-        AppData::new(req_tx)
+        AppData::new(req_tx.clone())
     };
 
     tokio::task::spawn_blocking(move || {
-        // describe the main window
         let main_window = WindowDesc::new(ui_builder)
             .title(WINDOW_TITLE)
             .window_size((800.0, 600.0));
@@ -82,7 +81,7 @@ async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
             });
 
         tokio::spawn(async move {
-            req_tx_exit
+            req_tx
                 .send(RunRequest::Stop)
                 .await
                 .expect("Cannot send message to stop spawner");

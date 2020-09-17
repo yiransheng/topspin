@@ -90,6 +90,10 @@ impl<V> ProgramMap<V> {
         }
     }
 
+    pub fn drain(&mut self) -> impl Iterator<Item = V> + '_ {
+        self.elements.drain(..).filter_map(|v| v)
+    }
+
     pub fn get(&self, key: ProgramId) -> Option<&V> {
         let index = key.0 as usize;
         self.elements.get(index).map(Option::as_ref).flatten()

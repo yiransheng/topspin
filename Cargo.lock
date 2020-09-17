@@ -1595,6 +1595,7 @@ version = "0.1.0"
 dependencies = [
  "daemonize",
  "druid",
+ "libc",
  "log",
  "serde",
  "shell-words",

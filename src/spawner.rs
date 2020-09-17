@@ -46,31 +46,12 @@ pub struct Spawner<W> {
     alias_to_id: HashMap<String, ProgramId>,
 }
 
-#[derive(Copy, Clone)]
-struct Kill;
-
-struct KillableChild {
-    killed: bool,
-    kill_chan: oneshot::Receiver<Kill>,
-    child: Child,
-}
-
-impl Future for KillableChild {
-    type Output = ::tokio::io::Result<ExitStatus>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.killed {
-            Pin::new(&mut self.child).poll(cx)
-        } else if let Poll::Ready(_) = Pin::new(&mut self.kill_chan).poll(cx) {
-            match self.child.kill() {
-                Ok(_) => {}
-                Err(err) => return Poll::Ready(Err(err)),
-            }
-            self.killed = true;
-            Pin::new(&mut self.child).poll(cx)
-        } else {
-            Pin::new(&mut self.child).poll(cx)
+impl<W> Drop for Spawner<W> {
+    fn drop(&mut self) {
+        for tx in self.spawned.drain() {
+            let _ = tx.send(Kill);
         }
+        self.alias_to_id.clear();
     }
 }
 
@@ -124,9 +105,11 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
                             let _ = self.log_sinks.insert(id, sink);
                         }
                         Err(err) => {
-                            let mut resp = self.responses.clone();
-                            tokio::spawn(async move {
-                                resp.send(RunResponse::IoError(id, err)).await.die_on_err();
+                            tokio::spawn({
+                                let mut resp = self.responses.clone();
+                                async move {
+                                    resp.send(RunResponse::IoError(id, err)).await.die_on_err();
+                                }
                             });
                         }
                     }
@@ -260,7 +243,7 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
     let mut log_forwarder = LogForward { stdout, stderr };
     tokio::spawn(async move {
         if let Err(err) = log_forwarder.run(log_sinks).await {
-            log::error!("{}", err);
+            log::error!("Error forwarding logs: {}", err);
         }
     });
 
@@ -271,8 +254,6 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
         child,
     };
 
-    // Ensure the child process is spawned in the runtime so it can
-    // make progress on its own while we await for any output.
     let _join_handle = tokio::spawn(async move {
         match child.await {
             Ok(status) => {
@@ -287,6 +268,50 @@ fn run_command<W: 'static + AsyncWrite + Send + std::marker::Unpin>(
     });
 
     Ok(tx)
+}
+
+#[derive(Copy, Clone)]
+struct Kill;
+
+struct KillableChild {
+    killed: bool,
+    kill_chan: oneshot::Receiver<Kill>,
+    child: Child,
+}
+
+impl KillableChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        if self.killed {
+            return Ok(());
+        }
+        let success = unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        if success != 0 {
+            // Reads from errno
+            return Err(std::io::Error::last_os_error());
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Future for KillableChild {
+    type Output = ::tokio::io::Result<ExitStatus>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.killed {
+            Pin::new(&mut self.child).poll(cx)
+        } else if let Poll::Ready(_) = Pin::new(&mut self.kill_chan).poll(cx) {
+            log::info!("Killing {}", self.child.id());
+            match self.kill() {
+                Ok(_) => {}
+                Err(err) => return Poll::Ready(Err(err)),
+            }
+            self.killed = true;
+            Pin::new(&mut self.child).poll(cx)
+        } else {
+            Pin::new(&mut self.child).poll(cx)
+        }
+    }
 }
 
 #[cfg(test)]

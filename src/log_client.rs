@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::io::{self, Read, StderrLock, StdoutLock, Write};
 use std::mem::size_of;
-use std::net::{TcpStream};
+use std::net::TcpStream;
 
 use crate::constants::{STDERR_TAG, STDOUT_TAG};
 
@@ -46,9 +46,20 @@ impl Buffer {
         }
     }
 
+    #[inline(always)]
     fn advance(&mut self, len: usize) {
-        debug_assert!(self.write_cursor + len < self.inner.len());
+        debug_assert!(self.write_cursor + len <= self.inner.len());
         self.write_cursor += len;
+        if self.read_cursor > 0 && self.write_cursor == self.inner.len() {
+            // Buffer full and has space to cleanup (bytes already consumed)
+            let len = self.write_cursor - self.read_cursor;
+            let mut new_inner = [0; 4096];
+            (&mut new_inner[0..len])
+                .clone_from_slice(&self.inner[self.read_cursor..self.write_cursor]);
+            self.inner = new_inner;
+            self.read_cursor = 0;
+            self.write_cursor = len;
+        }
     }
 
     fn write_buffer(&mut self) -> &mut [u8] {
@@ -60,6 +71,7 @@ impl Buffer {
         let w = self.write_cursor;
         let bytes = &self.inner[r..w];
         let (frame, len) = Frame::parse(bytes)?;
+        assert!(len <= 1024);
         if r + len == w {
             self.read_cursor = 0;
             self.write_cursor = 0;
@@ -84,14 +96,14 @@ impl<'a> Frame<'a> {
             return None;
         }
         let tag: u8 = bytes[0];
-        let len: u64 = u64::from_be_bytes((&bytes[1..Frame::PREFIX_SIZE]).try_into().unwrap());
+        let len: u64 = u64::from_le_bytes((&bytes[1..Frame::PREFIX_SIZE]).try_into().unwrap());
 
         let data_start = Frame::PREFIX_SIZE;
         let data_end = data_start + (len as usize);
         if data_end > bytes.len() {
             return None;
         }
-        let frame = match [tag] {
+        let frame = match tag {
             STDOUT_TAG => Frame::Stdout(&bytes[data_start..data_end]),
             STDERR_TAG => Frame::Stderr(&bytes[data_start..data_end]),
             _ => panic!("Invalid tag"),
@@ -107,3 +119,6 @@ impl<'a> Frame<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {}

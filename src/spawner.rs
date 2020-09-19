@@ -1,6 +1,7 @@
 use std::future::Future;
 
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -220,26 +221,29 @@ impl LogForward {
         &mut self,
         new_sinks: Unclaimed<W>,
     ) -> tokio::io::Result<()> {
+        const FRAME_HEADER_LEN: usize = size_of::<u8>() + size_of::<u64>();
+
         let mut out_buf: [u8; 1024] = [0; 1024];
         let mut err_buf: [u8; 1024] = [0; 1024];
+        out_buf[0] = STDOUT_TAG;
+        err_buf[0] = STDERR_TAG;
 
         let mut sinks: Vec<Option<W>> = vec![];
 
         let mut buf: &[u8];
-        let mut tag: &[u8];
 
         loop {
             let len = tokio::select! {
-                len = self.stdout.read(&mut out_buf) => {
+                len = self.stdout.read(&mut out_buf[FRAME_HEADER_LEN..]) => {
                     let len = len?;
-                    tag = &STDOUT_TAG;
-                    buf = &out_buf[0..len];
+                    (&mut out_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u64).to_le_bytes());
+                    buf = &out_buf[0..len+FRAME_HEADER_LEN];
                     len
                 }
-                len = self.stderr.read(&mut err_buf) => {
+                len = self.stderr.read(&mut err_buf[FRAME_HEADER_LEN..]) => {
                     let len = len?;
-                    tag = &STDERR_TAG;
-                    buf = &err_buf[0..len];
+                    (&mut err_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u64).to_le_bytes());
+                    buf = &err_buf[0..len+FRAME_HEADER_LEN];
                     len
                 }
             };
@@ -253,10 +257,8 @@ impl LogForward {
             }
             for sink in sinks.iter_mut() {
                 let mut sink_taken = sink.take().unwrap();
-                if LogForward::write_frame(&mut sink_taken, tag, buf)
-                    .await
-                    .is_err()
-                {
+                if let Err(err) = LogForward::write_frame(&mut sink_taken, buf).await {
+                    log::error!("write log error: {}", err);
                     drop(sink_taken);
                     break;
                 }
@@ -272,14 +274,9 @@ impl LogForward {
 
     async fn write_frame<W: AsyncWrite + std::marker::Unpin>(
         out: &mut W,
-        tag: &[u8],
         contents: &[u8],
     ) -> tokio::io::Result<()> {
-        let len = contents.len();
-        out.write(tag).await?;
-        // In Big Endian
-        out.write_u64(len as u64).await?;
-        out.write(contents).await?;
+        out.write_all(contents).await?;
         Ok(())
     }
 }

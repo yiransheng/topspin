@@ -18,3 +18,7 @@ libc = "0.2"
 simple_logger = "1.6.0"
 toml = "0.5.6"
 shell-words = "1.0.0"
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"

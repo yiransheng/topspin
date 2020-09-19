@@ -18,29 +18,30 @@ fn stream_logs<R: Read>(mut input_stream: R) -> io::Result<()> {
     let mut out = out.lock();
     let mut err = err.lock();
 
-    let mut buf = Buffer::new();
+    let mut buf_inner = [0u8; 4096];
+    let mut buf = Buffer::new(&mut buf_inner[..]);
     loop {
         let len = input_stream.read(buf.write_buffer())?;
         if len == 0 {
             return Ok(());
         }
         buf.advance(len);
-        if let Some(frame) = buf.read_frame() {
+        if let Some(frame) = buf.read_frame()? {
             frame.write_to(&mut out, &mut err)?;
         }
     }
 }
 
-struct Buffer {
-    inner: [u8; 4096],
+struct Buffer<'b> {
+    inner: &'b mut [u8],
     read_cursor: usize,
     write_cursor: usize,
 }
 
-impl Buffer {
-    fn new() -> Self {
+impl<'b> Buffer<'b> {
+    fn new(inner: &'b mut [u8]) -> Self {
         Self {
-            inner: [0; 4096],
+            inner,
             read_cursor: 0,
             write_cursor: 0,
         }
@@ -52,13 +53,6 @@ impl Buffer {
         self.write_cursor += len;
         if self.read_cursor > 0 && self.write_cursor == self.inner.len() {
             // Buffer full and has space to cleanup (bytes already consumed)
-            let len = self.write_cursor - self.read_cursor;
-            let mut new_inner = [0; 4096];
-            (&mut new_inner[0..len])
-                .clone_from_slice(&self.inner[self.read_cursor..self.write_cursor]);
-            self.inner = new_inner;
-            self.read_cursor = 0;
-            self.write_cursor = len;
         }
     }
 
@@ -66,11 +60,14 @@ impl Buffer {
         &mut self.inner[self.write_cursor..]
     }
 
-    fn read_frame<'a>(&'a mut self) -> Option<Frame<'a>> {
+    fn read_frame<'a>(&'a mut self) -> io::Result<Option<Frame<'a>>> {
         let r = self.read_cursor;
         let w = self.write_cursor;
         let bytes = &self.inner[r..w];
-        let (frame, len) = Frame::parse(bytes)?;
+        let (frame, len) = match Frame::parse(bytes).map_err::<io::Error, _>(Into::into)? {
+            Some(x) => x,
+            None => return Ok(None),
+        };
         assert!(len <= 1024);
         if r + len == w {
             self.read_cursor = 0;
@@ -78,7 +75,7 @@ impl Buffer {
         } else {
             self.read_cursor = r + len;
         }
-        Some(frame)
+        Ok(Some(frame))
     }
 }
 
@@ -87,13 +84,22 @@ enum Frame<'a> {
     Stderr(&'a [u8]),
 }
 
+#[derive(Debug, Copy, Clone)]
+struct FrameError;
+
+impl Into<io::Error> for FrameError {
+    fn into(self) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, "Invalid Frame Tag")
+    }
+}
+
 impl<'a> Frame<'a> {
     const PREFIX_SIZE: usize = size_of::<u8>() + size_of::<u64>();
 
     // (Frame, bytes len consumed)
-    fn parse<'b>(bytes: &'b [u8]) -> Option<(Frame<'b>, usize)> {
+    fn parse<'b>(bytes: &'b [u8]) -> Result<Option<(Frame<'b>, usize)>, FrameError> {
         if bytes.len() < Self::PREFIX_SIZE {
-            return None;
+            return Ok(None);
         }
         let tag: u8 = bytes[0];
         let len: u64 = u64::from_le_bytes((&bytes[1..Frame::PREFIX_SIZE]).try_into().unwrap());
@@ -101,15 +107,15 @@ impl<'a> Frame<'a> {
         let data_start = Frame::PREFIX_SIZE;
         let data_end = data_start + (len as usize);
         if data_end > bytes.len() {
-            return None;
+            return Ok(None);
         }
         let frame = match tag {
             STDOUT_TAG => Frame::Stdout(&bytes[data_start..data_end]),
             STDERR_TAG => Frame::Stderr(&bytes[data_start..data_end]),
-            _ => panic!("Invalid tag"),
+            _ => return Err(FrameError),
         };
 
-        Some((frame, data_end))
+        Ok(Some((frame, data_end)))
     }
 
     fn write_to(self, out: &mut StdoutLock, err: &mut StderrLock) -> io::Result<()> {
@@ -125,10 +131,12 @@ mod tests {
     use super::*;
     use quickcheck::{Arbitrary, Gen};
 
+    const FRAME_MAX: usize = 16;
+
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct FrameMeta {
         tag: u8,
-        len: usize,
+        data_len: usize,
     }
 
     impl Arbitrary for FrameMeta {
@@ -139,30 +147,37 @@ mod tests {
                 } else {
                     STDERR_TAG
                 },
-                len: usize::arbitrary(g) % 1024,
+                data_len: usize::arbitrary(g) % FRAME_MAX,
             }
         }
     }
     impl FrameMeta {
         fn len(&self) -> usize {
-            if self.tag > 0 {
-                self.len + 1
-            } else {
-                self.len
-            }
+            self.data_len + size_of::<u8>() + size_of::<u64>()
         }
     }
 
     impl Read for FrameMeta {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let nread = std::cmp::min(self.len(), buf.len());
-            if self.tag > 0 && nread > 0 {
-                buf[0] = self.tag;
-                self.tag = 0;
-                self.len -= nread - 1;
-            } else {
-                self.len -= nread;
+            if self.tag == 0 {
+                return Ok(0);
             }
+            let mut nread = 0;
+            let p = size_of::<u64>();
+            if buf.len() > 0 {
+                buf[0] = self.tag;
+                nread = 1;
+            }
+            if buf.len() > 1 {
+                let n = std::cmp::min(buf.len(), 1 + p);
+                buf[1..n].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..n - 1]);
+                nread = n;
+            }
+            if buf.len() > p + 1 {
+                let n = std::cmp::min(self.len(), buf.len());
+                nread = n;
+            }
+            self.tag = 0;
             Ok(nread)
         }
     }
@@ -180,7 +195,7 @@ mod tests {
 
         fn next(&mut self) -> Option<Self::Item> {
             let mid = self.size_iter.next()?;
-            let mid = mid % 1024 + 1;
+            let mid = std::cmp::max(mid % FRAME_MAX, 1);
             if mid > self.source.len() {
                 self.source = &[];
                 None
@@ -194,7 +209,10 @@ mod tests {
 
     #[quickcheck]
     fn test_buffer(sizes: Vec<usize>, frames: Vec<FrameMeta>) -> bool {
-        let mut all_bytes: Vec<u8> = vec![0; 1024 * 32];
+        if frames.is_empty() {
+            return true;
+        }
+        let mut all_bytes: Vec<u8> = vec![0; FRAME_MAX * 32];
         let mut bytes = &mut all_bytes[..];
         for mut frame in frames {
             let len = frame.read(bytes).unwrap();
@@ -204,19 +222,23 @@ mod tests {
             let (_, b) = bytes.split_at_mut(len);
             bytes = b;
         }
+        // eprintln!("{:?}", &all_bytes[0..256]);
 
         let chunks = ChunkIter {
             source: &all_bytes[..],
             size_iter: sizes.into_iter(),
         };
-        let mut buffer = Buffer::new();
+        let mut buf_inner = [0u8; FRAME_MAX * 4];
+        let mut buffer = Buffer::new(&mut buf_inner[..]);
+        let mut i = 0;
         for mut slice in chunks {
+            eprintln!("item: {}", i);
             let nread = slice.read(buffer.write_buffer()).unwrap();
-            if nread == 0 {
+            buffer.advance(nread);
+            if buffer.read_frame().is_err() {
                 return false;
             }
-            buffer.advance(nread);
-            buffer.read_frame();
+            i += 1;
         }
         true
     }

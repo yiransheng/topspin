@@ -141,25 +141,6 @@ pub struct EntryData {
     pub(super) working_dir: Option<String>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum ValidationError {
-    MissingAlias,
-    MissingCommand,
-    WhileSpaceInCommand,
-    BadArgs,
-}
-
-impl Into<&'static str> for ValidationError {
-    fn into(self) -> &'static str {
-        match self {
-            ValidationError::MissingAlias => "Alias cannot be emtpy",
-            ValidationError::MissingCommand => "Command cannot be emtpy",
-            ValidationError::WhileSpaceInCommand => "Command cannot contain whitespaces",
-            ValidationError::BadArgs => "Error parsing shell arguments",
-        }
-    }
-}
-
 impl From<(String, CommandEntry)> for EntryData {
     fn from((alias, command_entry): (String, CommandEntry)) -> Self {
         let CommandEntry {
@@ -187,31 +168,5 @@ impl EntryData {
             args,
             working_dir: self.working_dir.clone(),
         })
-    }
-
-    pub(super) fn validated(&self) -> Result<Self, Vec<ValidationError>> {
-        let mut errors = vec![];
-        if self.alias.trim().is_empty() {
-            errors.push(ValidationError::MissingAlias);
-        }
-        if self.command.trim().is_empty() {
-            errors.push(ValidationError::MissingCommand);
-        }
-        if self.command.chars().any(char::is_whitespace) {
-            errors.push(ValidationError::WhileSpaceInCommand);
-        }
-        if shell_words::split(&self.args).is_err() {
-            errors.push(ValidationError::BadArgs);
-        }
-        if errors.is_empty() {
-            Ok(Self {
-                alias: self.alias.trim().to_string(),
-                command: self.command.trim().to_string(),
-                args: self.args.clone(),
-                working_dir: self.working_dir.clone(),
-            })
-        } else {
-            Err(errors)
-        }
     }
 }

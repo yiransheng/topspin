@@ -24,7 +24,7 @@ pub async fn load_entries() -> Result<Option<Commands>, Box<dyn std::error::Erro
         .map(Into::into)
         .ok()
         .or_else(|| {
-            std::env::home_dir().map(|mut home| {
+            dirs::home_dir().map(|mut home| {
                 home.push(".config/topspin.toml");
                 home
             })

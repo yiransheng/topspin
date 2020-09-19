@@ -20,6 +20,10 @@ use crate::persist::load_entries;
 use crate::spawner::Spawner;
 use crate::ui::{app_data::AppData, ui_builder};
 
+#[cfg(test)]
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
+
 #[derive(Debug, StructOpt)]
 struct Opt {
     // If set run in client mode.

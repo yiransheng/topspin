@@ -121,4 +121,103 @@ impl<'a> Frame<'a> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use quickcheck::{Arbitrary, Gen};
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    struct FrameMeta {
+        tag: u8,
+        len: usize,
+    }
+
+    impl Arbitrary for FrameMeta {
+        fn arbitrary<G: Gen>(g: &mut G) -> FrameMeta {
+            FrameMeta {
+                tag: if bool::arbitrary(g) {
+                    STDOUT_TAG
+                } else {
+                    STDERR_TAG
+                },
+                len: usize::arbitrary(g) % 1024,
+            }
+        }
+    }
+    impl FrameMeta {
+        fn len(&self) -> usize {
+            if self.tag > 0 {
+                self.len + 1
+            } else {
+                self.len
+            }
+        }
+    }
+
+    impl Read for FrameMeta {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let nread = std::cmp::min(self.len(), buf.len());
+            if self.tag > 0 && nread > 0 {
+                buf[0] = self.tag;
+                self.tag = 0;
+                self.len -= nread - 1;
+            } else {
+                self.len -= nread;
+            }
+            Ok(nread)
+        }
+    }
+
+    struct ChunkIter<'a, I> {
+        source: &'a [u8],
+        size_iter: I,
+    }
+
+    impl<'a, I> Iterator for ChunkIter<'a, I>
+    where
+        I: Iterator<Item = usize>,
+    {
+        type Item = &'a [u8];
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let mid = self.size_iter.next()?;
+            let mid = mid % 1024 + 1;
+            if mid > self.source.len() {
+                self.source = &[];
+                None
+            } else {
+                let (item, remaining) = self.source.split_at(mid);
+                self.source = remaining;
+                Some(item)
+            }
+        }
+    }
+
+    #[quickcheck]
+    fn test_buffer(sizes: Vec<usize>, frames: Vec<FrameMeta>) -> bool {
+        let mut all_bytes: Vec<u8> = vec![0; 1024 * 32];
+        let mut bytes = &mut all_bytes[..];
+        for mut frame in frames {
+            let len = frame.read(bytes).unwrap();
+            if len == 0 {
+                break;
+            }
+            let (_, b) = bytes.split_at_mut(len);
+            bytes = b;
+        }
+
+        let chunks = ChunkIter {
+            source: &all_bytes[..],
+            size_iter: sizes.into_iter(),
+        };
+        let mut buffer = Buffer::new();
+        for mut slice in chunks {
+            let nread = slice.read(buffer.write_buffer()).unwrap();
+            if nread == 0 {
+                return false;
+            }
+            buffer.advance(nread);
+            buffer.read_frame();
+        }
+        true
+    }
+}

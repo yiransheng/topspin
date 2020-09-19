@@ -2,8 +2,10 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use druid::{AppLauncher, ExtEventSink, LocalizedString, WindowDesc};
+use structopt::StructOpt;
 
 mod constants;
+mod log_client;
 mod log_server;
 mod model;
 mod persist;
@@ -11,15 +13,29 @@ mod spawner;
 mod ui;
 
 use crate::constants::RUN_RESPONSES;
+use crate::log_client::run_log_client;
 use crate::log_server::run_log_server;
 use crate::model::{RunRequest, RunResponse};
 use crate::persist::load_entries;
 use crate::spawner::Spawner;
 use crate::ui::{app_data::AppData, ui_builder};
 
+#[derive(Debug, StructOpt)]
+struct Opt {
+    // If set run in client mode.
+    #[structopt(short, long)]
+    connect: Option<String>,
+}
+
 const WINDOW_TITLE: LocalizedString<AppData> = LocalizedString::new("Top Spin");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let opt = Opt::from_args();
+    if let Some(alias) = opt.connect {
+        run_log_client(&alias)?;
+        return Ok(());
+    }
+
     // do not daemonize in debug mode.
     #[cfg(not(debug_assertions))]
     {

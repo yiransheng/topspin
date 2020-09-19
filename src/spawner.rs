@@ -15,6 +15,7 @@ use tokio::sync::{
     oneshot,
 };
 
+use crate::constants::{STDERR_TAG, STDOUT_TAG};
 use crate::model::{ProgramId, ProgramMap, RunCommand, RunRequest, RunResponse, SpawnerInput};
 
 type Unclaimed<T> = Arc<Mutex<Vec<T>>>;
@@ -224,9 +225,6 @@ impl LogForward {
 
         let mut sinks: Vec<Option<W>> = vec![];
 
-        const STDOUT_TAG: [u8; 1] = [1];
-        const STDERR_TAG: [u8; 1] = [2];
-
         let mut buf: &[u8];
         let mut tag: &[u8];
 
@@ -279,6 +277,7 @@ impl LogForward {
     ) -> tokio::io::Result<()> {
         let len = contents.len();
         out.write(tag).await?;
+        // In Big Endian
         out.write_u64(len as u64).await?;
         out.write(contents).await?;
         Ok(())

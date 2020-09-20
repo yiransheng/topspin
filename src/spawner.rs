@@ -221,7 +221,7 @@ impl LogForward {
         &mut self,
         new_sinks: Unclaimed<W>,
     ) -> tokio::io::Result<()> {
-        const FRAME_HEADER_LEN: usize = size_of::<u8>() + size_of::<u64>();
+        const FRAME_HEADER_LEN: usize = size_of::<u8>() + size_of::<u16>();
 
         let mut out_buf: [u8; 1024] = [0; 1024];
         let mut err_buf: [u8; 1024] = [0; 1024];
@@ -236,13 +236,13 @@ impl LogForward {
             let len = tokio::select! {
                 len = self.stdout.read(&mut out_buf[FRAME_HEADER_LEN..]) => {
                     let len = len?;
-                    (&mut out_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u64).to_le_bytes());
+                    (&mut out_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u16).to_le_bytes());
                     buf = &out_buf[0..len+FRAME_HEADER_LEN];
                     len
                 }
                 len = self.stderr.read(&mut err_buf[FRAME_HEADER_LEN..]) => {
                     let len = len?;
-                    (&mut err_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u64).to_le_bytes());
+                    (&mut err_buf[1..FRAME_HEADER_LEN]).clone_from_slice(&(len as u16).to_le_bytes());
                     buf = &err_buf[0..len+FRAME_HEADER_LEN];
                     len
                 }

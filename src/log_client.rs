@@ -22,17 +22,17 @@ fn stream_logs<R: Read>(mut input_stream: R) -> io::Result<()> {
     loop {
         let buf_full = buf.full();
         let nread = input_stream.read(buf.available())?;
-        match (buf_full, nread) {
-            (false, 0) => return Ok(()),
-            _ => {}
-        }
         buf.advance(nread);
         if let Some(frame) = buf.read_frame()? {
             frame.write_to(&mut out, &mut err)?;
         }
+        if nread == 0 && !buf_full {
+            return Ok(());
+        }
     }
 }
 
+#[derive(Debug)]
 struct Buffer {
     inner: Box<[u8]>,
     read_cursor: usize,
@@ -116,7 +116,7 @@ impl Into<io::Error> for FrameError {
 }
 
 impl<'a> Frame<'a> {
-    const PREFIX_SIZE: usize = size_of::<u8>() + size_of::<u64>();
+    const PREFIX_SIZE: usize = size_of::<u8>() + size_of::<u16>();
 
     // (Frame, bytes len consumed)
     fn parse<'b>(bytes: &'b [u8]) -> Result<Option<(Frame<'b>, usize)>, FrameError> {
@@ -124,7 +124,7 @@ impl<'a> Frame<'a> {
             return Ok(None);
         }
         let tag: u8 = bytes[0];
-        let len: u64 = u64::from_le_bytes((&bytes[1..Frame::PREFIX_SIZE]).try_into().unwrap());
+        let len: u16 = u16::from_le_bytes((&bytes[1..Frame::PREFIX_SIZE]).try_into().unwrap());
 
         let data_start = Frame::PREFIX_SIZE;
         let data_end = data_start + (len as usize);
@@ -160,6 +160,88 @@ mod tests {
         tag: u8,
         data_len: usize,
     }
+    struct ChunkIter<'a, I> {
+        source: &'a [u8],
+        size_iter: I,
+    }
+
+    #[quickcheck]
+    fn test_buffer(frames: Vec<FrameMeta>, chunk_sizes: Vec<usize>) -> bool {
+        let passed = check_buffer(frames, chunk_sizes);
+        passed
+    }
+
+    #[test]
+    fn test_buffer_debug() {
+        // Shunk test data produced by quickcheck from the last failed run.
+        let passed = check_buffer(
+            vec![
+                FrameMeta {
+                    tag: 2,
+                    data_len: 11,
+                },
+                FrameMeta {
+                    tag: 2,
+                    data_len: 13,
+                },
+                FrameMeta {
+                    tag: 2,
+                    data_len: 2,
+                },
+                FrameMeta {
+                    tag: 1,
+                    data_len: 15,
+                },
+                FrameMeta {
+                    tag: 1,
+                    data_len: 10,
+                },
+            ],
+            vec![40, 7, 19, 45, 84, 11, 6, 13, 0],
+        );
+        assert!(passed);
+    }
+
+    fn check_buffer(frames: Vec<FrameMeta>, chunk_sizes: Vec<usize>) -> bool {
+        if frames.is_empty() || chunk_sizes.is_empty() {
+            return true;
+        }
+        let mut all_bytes: Vec<u8> = vec![0; FRAME_MAX * 64];
+        let mut bytes = &mut all_bytes[..];
+        for mut frame in frames {
+            let len = frame.read(bytes).unwrap();
+            if len == 0 {
+                break;
+            }
+            let (_, b) = bytes.split_at_mut(len);
+            bytes = b;
+        }
+        let unwritten = bytes.len();
+        let data_len = all_bytes.len() - unwritten;
+
+        let chunks = ChunkIter {
+            source: &all_bytes[..data_len],
+            size_iter: chunk_sizes.into_iter(),
+        };
+        let mut buffer = Buffer::with_capacity(FRAME_MAX * 2).unwrap();
+        for mut slice in chunks {
+            // Drain the slice before moving on to the next chunk.
+            while !slice.is_empty() {
+                buffer.advance(0);
+                if buffer.full() {
+                    // Buffer should never be full (since it is sized 2*MAC_FRAME size)
+                    return false;
+                }
+                let nread = slice.read(buffer.available()).unwrap();
+                buffer.advance(nread);
+                if buffer.read_frame().is_err() {
+                    // Should never read illegal tag byte.
+                    return false;
+                }
+            }
+        }
+        true
+    }
 
     impl Arbitrary for FrameMeta {
         fn arbitrary<G: Gen>(g: &mut G) -> FrameMeta {
@@ -169,13 +251,17 @@ mod tests {
                 } else {
                     STDERR_TAG
                 },
-                data_len: usize::arbitrary(g) % FRAME_MAX,
+                data_len: usize::arbitrary(g) % (FRAME_MAX - Self::header_len()),
             }
         }
     }
+
     impl FrameMeta {
         fn len(&self) -> usize {
-            self.data_len + size_of::<u8>() + size_of::<u64>()
+            self.data_len + Self::header_len()
+        }
+        fn header_len() -> usize {
+            size_of::<u8>() + size_of::<u16>()
         }
     }
 
@@ -184,27 +270,22 @@ mod tests {
             if self.tag == 0 {
                 return Ok(0);
             }
-            let p = 1 + size_of::<u64>();
+            let h = Self::header_len();
             let nread = match buf.len() {
                 0 => 0,
-                n if n <= p => {
+                n if n <= h => {
                     buf[0] = self.tag;
-                    buf[1..n].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..(n - 1)]);
+                    buf[1..n].copy_from_slice(&(self.data_len as u16).to_le_bytes()[..(n - 1)]);
                     n
                 }
                 _ => {
                     buf[0] = self.tag;
-                    buf[1..p].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..]);
+                    buf[1..h].copy_from_slice(&(self.data_len as u16).to_le_bytes()[..]);
                     std::cmp::min(self.len(), buf.len())
                 }
             };
             Ok(nread)
         }
-    }
-
-    struct ChunkIter<'a, I> {
-        source: &'a [u8],
-        size_iter: I,
     }
 
     impl<'a, I> Iterator for ChunkIter<'a, I>
@@ -225,40 +306,5 @@ mod tests {
                 Some(item)
             }
         }
-    }
-
-    #[quickcheck]
-    fn test_buffer(sizes: Vec<usize>, frames: Vec<FrameMeta>) -> bool {
-        if frames.is_empty() {
-            return true;
-        }
-        let mut all_bytes: Vec<u8> = vec![0; FRAME_MAX * 32];
-        let mut bytes = &mut all_bytes[..];
-        for mut frame in frames {
-            let len = frame.read(bytes).unwrap();
-            if len == 0 {
-                break;
-            }
-            let (_, b) = bytes.split_at_mut(len);
-            bytes = b;
-        }
-        // eprintln!("{:?}", &all_bytes[0..256]);
-
-        let chunks = ChunkIter {
-            source: &all_bytes[..],
-            size_iter: sizes.into_iter(),
-        };
-        let mut buffer = Buffer::with_capacity(FRAME_MAX * 2).unwrap();
-        let mut i = 0;
-        for mut slice in chunks {
-            eprintln!("item: {}", i);
-            let nread = slice.read(buffer.available()).unwrap();
-            buffer.advance(nread);
-            if buffer.read_frame().is_err() {
-                return false;
-            }
-            i += 1;
-        }
-        true
     }
 }

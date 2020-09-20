@@ -60,7 +60,7 @@ fn actions() -> impl Widget<(AppData, Entry)> {
     ViewSwitcher::new(
         |(_, entry): &(_, Entry), _env| entry.state,
         |selector, _data, _env| match *selector {
-            RunState::Idle(..) => Box::new(start_button()),
+            RunState::Idle(..) => Box::new(idle_buttons()),
             RunState::Running(..) => Box::new(kill_button()),
             _ => Box::new(Label::new("waiting...")),
         },
@@ -68,7 +68,7 @@ fn actions() -> impl Widget<(AppData, Entry)> {
     .align_right()
 }
 
-fn start_button() -> impl Widget<(AppData, Entry)> {
+fn idle_buttons() -> impl Widget<(AppData, Entry)> {
     let start = Button::new("Start")
         .on_click(|_ctx, (app_data, entry): &mut (AppData, Entry), _env| {
             let id = match entry.state {

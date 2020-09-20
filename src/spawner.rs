@@ -98,7 +98,7 @@ impl<W: 'static + Send + AsyncWrite + std::marker::Unpin> Spawner<W> {
                 SpawnerInput::RunRequest(RunRequest::Run(cmd)) => {
                     let id = cmd.id;
                     let sink = Arc::new(Mutex::new(Vec::new()));
-                    let alias = cmd.alias.clone();
+                    let alias = cmd.alias.trim().to_string();
                     let kill_chan = run_command(cmd, self.responses.clone(), sink.clone());
                     match kill_chan {
                         Ok(kill_chan) => {

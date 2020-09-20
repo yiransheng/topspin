@@ -1,11 +1,11 @@
 use druid::lens::{Id, LensExt};
 use druid::widget::{Align, Button, CrossAxisAlignment, Flex, FlexParams, Label, TextBox};
-use druid::{self, im, Lens, Target, Widget, WidgetExt};
+use druid::{self, Lens, Target, Widget, WidgetExt};
 
-use super::app_data::{Entry, EntryData};
+use super::app_data::{EntryData};
 use crate::constants::SAVE_TO_FILE;
 
-pub(super) fn new_entry() -> impl Widget<(EntryData, im::Vector<Entry>)> {
+pub(super) fn edit_entry() -> impl Widget<EntryData> {
     Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Start)
         .with_child(Align::centered(
@@ -13,43 +13,25 @@ pub(super) fn new_entry() -> impl Widget<(EntryData, im::Vector<Entry>)> {
         ))
         .with_spacer(8.0)
         .with_child(Label::new("Alias"))
-        .with_child(
-            TextBox::new()
-                .expand_width()
-                .lens(EntryData::alias)
-                .lens(druid::lens!((EntryData, _), 0)),
-        )
+        .with_child(TextBox::new().expand_width().lens(EntryData::alias))
         .with_spacer(8.0)
         .with_child(Label::new("Command"))
-        .with_child(
-            TextBox::new()
-                .expand_width()
-                .lens(EntryData::command)
-                .lens(druid::lens!((EntryData, _), 0)),
-        )
+        .with_child(TextBox::new().expand_width().lens(EntryData::command))
         .with_spacer(8.0)
         .with_child(Label::new("Arguments"))
-        .with_child(
-            TextBox::new()
-                .expand_width()
-                .lens(EntryData::args)
-                .lens(druid::lens!((EntryData, _), 0)),
-        )
+        .with_child(TextBox::new().expand_width().lens(EntryData::args))
         .with_spacer(8.0)
         .with_child(Label::new("Working Directory"))
         .with_child(
             TextBox::new()
                 .expand_width()
                 .lens(opt_string_lens())
-                .lens(EntryData::working_dir)
-                .lens(druid::lens!((EntryData, _), 0)),
+                .lens(EntryData::working_dir),
         )
         .with_spacer(16.0)
         .with_flex_child(
             Button::new("Done")
-                .on_click(|ctx, data: &mut (EntryData, im::Vector<Entry>), _env| {
-                    let entry_data = std::mem::replace(&mut data.0, EntryData::default());
-                    data.1.push_back(Entry::new(entry_data));
+                .on_click(|ctx, _data: &mut EntryData, _env| {
                     ctx.submit_command(SAVE_TO_FILE, Some(Target::Global));
                 })
                 .fix_size(72.0, 32.0),

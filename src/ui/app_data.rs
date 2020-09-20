@@ -11,10 +11,69 @@ use crate::persist::{dump_entries, CommandEntry, Commands};
 pub struct AppData {
     __id_counter: u32,
     pub entries: im::Vector<Entry>,
-    pub new_entry: Option<EntryData>,
+    pub edit_entry: EditState<EntryData>,
 
     #[data(ignore)]
     pub req_chan: mpsc::Sender<RunRequest>,
+}
+
+#[derive(Clone, Data, Eq, PartialEq)]
+pub enum EditState<T> {
+    New(T),
+    Edit(usize, T),
+    None,
+}
+
+impl<T> EditState<T> {
+    #[allow(dead_code)]
+    pub fn map<U, F>(&self, f: F) -> EditState<U>
+    where
+        F: Fn(&T) -> U,
+    {
+        match *self {
+            EditState::New(ref t) => EditState::New(f(t)),
+            EditState::Edit(i, ref t) => EditState::Edit(i, f(t)),
+            EditState::None => EditState::None,
+        }
+    }
+
+    pub fn map_to<U>(&self, v: U) -> EditState<U> {
+        match *self {
+            EditState::New(_) => EditState::New(v),
+            EditState::Edit(i, _) => EditState::Edit(i, v),
+            EditState::None => EditState::None,
+        }
+    }
+
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, EditState::None)
+    }
+
+    pub fn data() -> impl Lens<EditState<T>, T>
+    where
+        T: Default,
+    {
+        EditStateLens
+    }
+}
+
+struct EditStateLens;
+
+impl<T: Default> Lens<EditState<T>, T> for EditStateLens {
+    fn with<V, F: FnOnce(&T) -> V>(&self, data: &EditState<T>, f: F) -> V {
+        match *data {
+            EditState::New(ref x) => f(x),
+            EditState::Edit(_, ref x) => f(x),
+            EditState::None => f(&T::default()),
+        }
+    }
+    fn with_mut<V, F: FnOnce(&mut T) -> V>(&self, data: &mut EditState<T>, f: F) -> V {
+        match *data {
+            EditState::New(ref mut x) => f(x),
+            EditState::Edit(_, ref mut x) => f(x),
+            EditState::None => f(&mut T::default()),
+        }
+    }
 }
 
 impl ProgramIdGen for AppData {
@@ -28,7 +87,7 @@ impl AppData {
         Self {
             __id_counter: 0,
             req_chan,
-            new_entry: None,
+            edit_entry: EditState::None,
             entries: im::vector![],
         }
     }
@@ -42,8 +101,22 @@ impl AppData {
         Self {
             __id_counter: 0,
             req_chan,
-            new_entry: None,
+            edit_entry: EditState::None,
             entries,
+        }
+    }
+
+    pub fn done_editing(&mut self) {
+        match self.edit_entry.take() {
+            EditState::None => {}
+            EditState::New(entry_data) => {
+                self.entries.push_back(Entry::new(entry_data));
+            }
+            EditState::Edit(index, entry_data) => {
+                if let Some(old_entry) = self.entries.get_mut(index) {
+                    old_entry.data = entry_data;
+                }
+            }
         }
     }
 

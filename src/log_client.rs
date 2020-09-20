@@ -18,45 +18,67 @@ fn stream_logs<R: Read>(mut input_stream: R) -> io::Result<()> {
     let mut out = out.lock();
     let mut err = err.lock();
 
-    let mut buf_inner = [0u8; 4096];
-    let mut buf = Buffer::new(&mut buf_inner[..]);
+    let mut buf = Buffer::new();
     loop {
-        let len = input_stream.read(buf.write_buffer())?;
-        if len == 0 {
-            return Ok(());
+        let buf_full = buf.full();
+        let nread = input_stream.read(buf.available())?;
+        match (buf_full, nread) {
+            (false, 0) => return Ok(()),
+            _ => {}
         }
-        buf.advance(len);
+        buf.advance(nread);
         if let Some(frame) = buf.read_frame()? {
             frame.write_to(&mut out, &mut err)?;
         }
     }
 }
 
-struct Buffer<'b> {
-    inner: &'b mut [u8],
+struct Buffer {
+    inner: Box<[u8]>,
     read_cursor: usize,
     write_cursor: usize,
 }
 
-impl<'b> Buffer<'b> {
-    fn new(inner: &'b mut [u8]) -> Self {
+impl Buffer {
+    const DEFAULT_SIZE: usize = 4096;
+
+    fn new() -> Self {
         Self {
-            inner,
+            inner: Box::new([0; Self::DEFAULT_SIZE]),
             read_cursor: 0,
             write_cursor: 0,
         }
     }
 
-    #[inline(always)]
+    fn with_capacity(cap: usize) -> Option<Self> {
+        let capacity = match cap.checked_next_power_of_two() {
+            Some(capacity) => capacity,
+            _ => return None,
+        };
+        Some(Self {
+            inner: vec![0; capacity].into_boxed_slice(),
+            read_cursor: 0,
+            write_cursor: 0,
+        })
+    }
+
     fn advance(&mut self, len: usize) {
         debug_assert!(self.write_cursor + len <= self.inner.len());
         self.write_cursor += len;
-        if self.read_cursor > 0 && self.write_cursor == self.inner.len() {
+        if self.read_cursor > 0 && self.full() {
             // Buffer full and has space to cleanup (bytes already consumed)
+            let unprocessed_data = self.read_cursor..self.write_cursor;
+            (&mut self.inner).copy_within(unprocessed_data, 0);
+            self.write_cursor -= self.read_cursor;
+            self.read_cursor = 0;
         }
     }
 
-    fn write_buffer(&mut self) -> &mut [u8] {
+    fn full(&self) -> bool {
+        self.write_cursor == self.inner.len()
+    }
+
+    fn available(&mut self) -> &mut [u8] {
         &mut self.inner[self.write_cursor..]
     }
 
@@ -162,22 +184,20 @@ mod tests {
             if self.tag == 0 {
                 return Ok(0);
             }
-            let mut nread = 0;
-            let p = size_of::<u64>();
-            if buf.len() > 0 {
-                buf[0] = self.tag;
-                nread = 1;
-            }
-            if buf.len() > 1 {
-                let n = std::cmp::min(buf.len(), 1 + p);
-                buf[1..n].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..n - 1]);
-                nread = n;
-            }
-            if buf.len() > p + 1 {
-                let n = std::cmp::min(self.len(), buf.len());
-                nread = n;
-            }
-            self.tag = 0;
+            let p = 1 + size_of::<u64>();
+            let nread = match buf.len() {
+                0 => 0,
+                n if n <= p => {
+                    buf[0] = self.tag;
+                    buf[1..n].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..(n - 1)]);
+                    n
+                }
+                _ => {
+                    buf[0] = self.tag;
+                    buf[1..p].copy_from_slice(&(self.data_len as u64).to_le_bytes()[..]);
+                    std::cmp::min(self.len(), buf.len())
+                }
+            };
             Ok(nread)
         }
     }
@@ -228,12 +248,11 @@ mod tests {
             source: &all_bytes[..],
             size_iter: sizes.into_iter(),
         };
-        let mut buf_inner = [0u8; FRAME_MAX * 4];
-        let mut buffer = Buffer::new(&mut buf_inner[..]);
+        let mut buffer = Buffer::with_capacity(FRAME_MAX * 2).unwrap();
         let mut i = 0;
         for mut slice in chunks {
             eprintln!("item: {}", i);
-            let nread = slice.read(buffer.write_buffer()).unwrap();
+            let nread = slice.read(buffer.available()).unwrap();
             buffer.advance(nread);
             if buffer.read_frame().is_err() {
                 return false;

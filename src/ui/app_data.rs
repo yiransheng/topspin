@@ -5,7 +5,7 @@ use druid::{im, Data, Lens};
 use tokio::sync::mpsc;
 
 use crate::model::{ProgramId, ProgramIdGen, RunCommand, RunRequest, RunResponse};
-use crate::persist::{CommandEntry, Commands};
+use crate::persist::{dump_entries, CommandEntry, Commands};
 
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
@@ -45,6 +45,10 @@ impl AppData {
             new_entry: None,
             entries,
         }
+    }
+
+    pub fn persist(&self) {
+        let _ = dump_entries(self.entries.iter().map(|e| e.data.clone().into()));
     }
 
     pub fn entries_lens() -> impl Lens<AppData, (AppData, im::Vector<Entry>)> {
@@ -154,6 +158,19 @@ impl From<(String, CommandEntry)> for EntryData {
             args: args.unwrap_or_else(String::new),
             working_dir,
         }
+    }
+}
+
+impl Into<(String, CommandEntry)> for EntryData {
+    fn into(self) -> (String, CommandEntry) {
+        (
+            self.alias,
+            CommandEntry {
+                command: self.command,
+                args: Some(self.args).filter(|s| !s.is_empty()),
+                working_dir: self.working_dir,
+            },
+        )
     }
 }
 

@@ -50,6 +50,7 @@ impl Buffer {
         }
     }
 
+    #[cfg(test)]
     fn with_capacity(cap: usize) -> Option<Self> {
         let capacity = match cap.checked_next_power_of_two() {
             Some(capacity) => capacity,

@@ -18,7 +18,7 @@ use crate::log_server::run_log_server;
 use crate::model::{RunRequest, RunResponse};
 use crate::persist::load_entries;
 use crate::spawner::Spawner;
-use crate::ui::{app_data::AppData, ui_builder};
+use crate::ui::{app_data::AppData, ui_builder, Delegate};
 
 #[cfg(test)]
 #[macro_use(quickcheck)]
@@ -93,6 +93,7 @@ async fn run() -> Result<(), Box<dyn ::std::error::Error>> {
         });
         // start the application
         launcher
+            .delegate(Delegate::new())
             .use_simple_logger()
             .launch(initial_state)
             .unwrap_or_else(|err| {

@@ -1,7 +1,9 @@
-use serde::Deserialize;
 use std::collections::BTreeMap;
 
-#[derive(Deserialize, Debug, Eq, PartialEq)]
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Commands {
     commands: BTreeMap<String, CommandEntry>,
 }
@@ -12,24 +14,17 @@ impl Commands {
     }
 }
 
-#[derive(Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct CommandEntry {
     pub command: String,
     pub args: Option<String>,
     pub working_dir: Option<String>,
 }
 
+static CONFIG_PATH: Lazy<Option<std::path::PathBuf>> = Lazy::new(|| get_config_path());
+
 pub async fn load_entries() -> Result<Option<Commands>, Box<dyn std::error::Error>> {
-    let config_path: Option<std::path::PathBuf> = std::env::var("TOPSPIN_CONFIG")
-        .map(Into::into)
-        .ok()
-        .or_else(|| {
-            dirs::home_dir().map(|mut home| {
-                home.push(".config/topspin.toml");
-                home
-            })
-        });
-    let config_path = if let Some(config_path) = config_path {
+    let config_path = if let Some(config_path) = CONFIG_PATH.as_ref() {
         config_path
     } else {
         return Ok(None);
@@ -38,6 +33,29 @@ pub async fn load_entries() -> Result<Option<Commands>, Box<dyn std::error::Erro
     let commands = toml::from_str(&file_contents)?;
 
     Ok(Some(commands))
+}
+
+pub fn dump_entries(entries: impl Iterator<Item = (String, CommandEntry)>) -> std::io::Result<()> {
+    if let Some(config_path) = CONFIG_PATH.as_ref() {
+        let commands = Commands {
+            commands: entries.collect(),
+        };
+        let file_contents: String = toml::to_string(&commands).expect("serialize error");
+        std::fs::write(config_path, file_contents)?;
+    }
+    Ok(())
+}
+
+fn get_config_path() -> Option<std::path::PathBuf> {
+    std::env::var("TOPSPIN_CONFIG")
+        .map(Into::into)
+        .ok()
+        .or_else(|| {
+            dirs::home_dir().map(|mut home| {
+                home.push(".config/topspin.toml");
+                home
+            })
+        })
 }
 
 #[cfg(test)]

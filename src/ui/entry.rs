@@ -4,6 +4,7 @@ use druid::widget::{
 use druid::{self, Color, Env, Widget, WidgetExt};
 
 use super::app_data::{AppData, Entry, RunState};
+use crate::constants::SAVE_TO_FILE;
 use crate::model::{ProgramIdGen, RunRequest};
 
 pub(super) fn entry() -> impl Widget<(AppData, Entry)> {
@@ -96,9 +97,10 @@ fn start_button() -> impl Widget<(AppData, Entry)> {
         .fix_size(72.0, 32.0);
 
     let delete = Button::new("Delete")
-        .on_click(|_ctx, (app_data, entry): &mut (AppData, Entry), _env| {
+        .on_click(|ctx, (app_data, entry): &mut (AppData, Entry), _env| {
             if let RunState::Idle(_) = entry.state {
                 app_data.entries.retain(|e| e != entry);
+                ctx.submit_command(SAVE_TO_FILE, None);
             }
         })
         .fix_size(72.0, 32.0);

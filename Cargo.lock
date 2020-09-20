@@ -1889,6 +1889,7 @@ dependencies = [
  "druid",
  "libc",
  "log",
+ "once_cell",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.7.3",

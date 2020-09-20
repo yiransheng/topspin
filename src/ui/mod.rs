@@ -1,6 +1,6 @@
 use druid::lens::{self, LensExt};
 use druid::widget::{Button, CrossAxisAlignment, Flex, List, Scroll, ViewSwitcher};
-use druid::{im, Widget, WidgetExt};
+use druid::{im, AppDelegate, Command, DelegateCtx, Env, Target, Widget, WidgetExt};
 
 pub mod app_data;
 
@@ -12,6 +12,31 @@ use self::app_data::{AppData, Entry, EntryData};
 use self::create::new_entry;
 use self::entry::entry;
 use self::response_handler::ResponseHandler;
+use crate::constants::SAVE_TO_FILE;
+
+pub struct Delegate {}
+
+impl Delegate {
+    pub fn new() -> Self {
+        Delegate {}
+    }
+}
+
+impl AppDelegate<AppData> for Delegate {
+    fn command(
+        &mut self,
+        _ctx: &mut DelegateCtx,
+        _target: Target,
+        cmd: &Command,
+        data: &mut AppData,
+        _env: &Env,
+    ) -> bool {
+        if let Some(_) = cmd.get(SAVE_TO_FILE) {
+            let _ = data.persist();
+        }
+        false
+    }
+}
 
 pub fn ui_builder() -> impl Widget<AppData> {
     let mut root = Flex::column();

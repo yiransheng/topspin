@@ -1,8 +1,9 @@
 use druid::lens::{Id, LensExt};
 use druid::widget::{Align, Button, CrossAxisAlignment, Flex, FlexParams, Label, TextBox};
-use druid::{self, im, Lens, Widget, WidgetExt};
+use druid::{self, im, Lens, Target, Widget, WidgetExt};
 
 use super::app_data::{Entry, EntryData};
+use crate::constants::SAVE_TO_FILE;
 
 pub(super) fn new_entry() -> impl Widget<(EntryData, im::Vector<Entry>)> {
     Flex::column()
@@ -46,9 +47,10 @@ pub(super) fn new_entry() -> impl Widget<(EntryData, im::Vector<Entry>)> {
         .with_spacer(16.0)
         .with_flex_child(
             Button::new("Done")
-                .on_click(|_ctx, data: &mut (EntryData, im::Vector<Entry>), _env| {
+                .on_click(|ctx, data: &mut (EntryData, im::Vector<Entry>), _env| {
                     let entry_data = std::mem::replace(&mut data.0, EntryData::default());
                     data.1.push_back(Entry::new(entry_data));
+                    ctx.submit_command(SAVE_TO_FILE, Some(Target::Global));
                 })
                 .fix_size(72.0, 32.0),
             FlexParams::new(1.0, CrossAxisAlignment::End),
